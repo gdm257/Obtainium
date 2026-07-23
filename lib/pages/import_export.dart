@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -9,9 +10,11 @@ import 'package:obtainium/components/generated_form_renderer.dart';
 import 'package:obtainium/components/ui_widgets.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/providers/cloud_storage_provider.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
+import 'package:obtainium/services/cloud_storage.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 
@@ -228,6 +231,59 @@ class _ImportSectionState extends State<ImportSection> {
           });
     }
 
+    Future<void> runCloudImport() async {
+      settingsProvider.selectionClick();
+      try {
+        final target = await pickCloudTarget(context);
+        if (target == null) return; // No target or user cancelled.
+        if (mounted) setState(() => importInProgress = true);
+
+        final csp = context.read<CloudStorageProvider>();
+        final files = await csp.list(target);
+        if (files.isEmpty) {
+          if (mounted) showMessage(tr('cloudListFailed'), context);
+          return;
+        }
+        final entries = {
+          for (final f in files)
+            f.filename: [
+              f.filename,
+              if (f.lastModified != null) f.lastModified.toString(),
+            ],
+        };
+        final picked = await showDialog<List<String>?>(
+          context: context,
+          builder: (_) => SelectionModal(
+            entries: entries,
+            onlyOneSelectionAllowed: true,
+            title: tr('cloudSelectFile'),
+          ),
+        );
+        if (picked == null || picked.isEmpty) return;
+
+        final data = await csp.download(target, picked.first);
+        // Validate before touching local state (Req 3.3): parse-only check.
+        try {
+          jsonDecode(data);
+        } catch (_) {
+          throw ObtainiumError(tr('invalidInput'));
+        }
+        final value = await appsProvider.import(data); // reuse local import (Req 3.4)
+        appsProvider.addMissingCategories(settingsProvider);
+        if (!context.mounted) return;
+        showMessage(
+          '${tr('importedX', args: [plural('apps', value.key.length).toLowerCase()])}${value.value ? ' + ${tr('settings').toLowerCase()}' : ''}',
+          context,
+        );
+      } catch (e) {
+        // Download/import failure leaves local state unchanged (Req 3.3).
+        if (!context.mounted) return;
+        _showImportError(e, context);
+      } finally {
+        if (mounted) setState(() => importInProgress = false);
+      }
+    }
+
     Future<void> runMassSourceImport(MassAppUrlSource source) async {
       try {
         final values = await showDialog<Map<String, dynamic>?>(
@@ -325,6 +381,11 @@ class _ImportSectionState extends State<ImportSection> {
                         ),
                       ),
               ),
+              ActionListTile(
+                icon: Icons.cloud_download_outlined,
+                label: tr('cloudImport'),
+                onTap: importInProgress ? null : runCloudImport,
+              ),
               ...context.read<SourceProvider>().massUrlSources.map(
                 (source) => ActionListTile(
                   icon: Icons.cloud_download_outlined,
@@ -363,6 +424,28 @@ class _ExportSectionState extends State<ExportSection> {
   Future<Uri?>? _exportDirFuture;
   String? _lastExportDirKey;
 
+  Future<void> _maybeUploadToCloud(BuildContext context) async {
+    final csp = context.read<CloudStorageProvider>();
+    if (!csp.hasAnyTarget) return; // No target configured — skip silently.
+    final target = await pickCloudTarget(context);
+    if (target == null) return; // User cancelled.
+    final appsProvider = context.read<AppsProvider>();
+    final json = appsProvider.generateExportJSON();
+    final bytes = Uint8List.fromList(utf8.encode(jsonEncode(json)));
+    // Reuse the existing local-export filename scheme (Req 2.2). ponytail: the
+    // timestamp is regenerated here rather than read back from the local file —
+    // capturing the exact local filename would require changing AppsProvider
+    //export()'s return value (a Req-4.1 isolation violation). The cloud file's
+    // timestamp differs from the local file by at most the few ms between the
+    // two DateTime.now() calls; acceptable for a timestamped history file.
+    final filename =
+        '${tr('obtainiumExportHyphenatedLowercase')}-${DateTime.now().toIso8601String().replaceAll(':', '-')}.json';
+    await csp.upload(target, filename, bytes);
+    if (context.mounted) {
+      showMessage(tr('cloudExportTo', args: [target.label]), context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final appsProvider = context.read<AppsProvider>();
@@ -383,10 +466,19 @@ class _ExportSectionState extends State<ExportSection> {
                   pickOnly || (await settingsProvider.getExportDir()) == null,
               sp: settingsProvider,
             )
-            .then((String? result) {
+            .then((String? result) async {
               if (result != null) {
                 if (!context.mounted) return;
                 showMessage(tr('exportedTo', args: [result]), context);
+                if (pickOnly) return;
+                // Cloud push (Req 2.1–2.4): pick one target, upload the same
+                // export JSON. Upload failures are independent of the already-
+                // written local file (Req 2.4).
+                try {
+                  await _maybeUploadToCloud(context);
+                } catch (e) {
+                  if (context.mounted) showError(e, context);
+                }
               }
             })
             .catchError((e) {
@@ -987,5 +1079,191 @@ class ImportFromURLListController extends ChangeNotifier {
   void dispose() {
     urlController.dispose();
     super.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cloud export/import (S3 / WebDAV) — fork-only feature, kept isolated below
+// the existing classes so upstream merges stay clean. Credentials are stored
+// plaintext under the existing `-creds` prefs convention (auto-exported when
+// "include settings" = all).
+// ---------------------------------------------------------------------------
+
+/// Dialog that lets the user pick a single configured cloud target, or null.
+/// Returns null when there are no targets (caller should pre-check).
+Future<CloudTarget?> pickCloudTarget(BuildContext context) async {
+  final csp = context.read<CloudStorageProvider>();
+  final targets = csp.availableTargets;
+  if (targets.isEmpty) {
+    showMessage(tr('cloudNoTargets'), context);
+    return null;
+  }
+  if (targets.length == 1) return targets.single;
+  final entries = {
+    for (final t in targets)
+      '${t.kind.name}|${t.label}': [t.label],
+  };
+  final picked = await showDialog<List<String>?>(
+    context: context,
+    builder: (_) => SelectionModal(entries: entries, onlyOneSelectionAllowed: true),
+  );
+  if (picked == null || picked.isEmpty) return null;
+  final i = picked.first.indexOf('|');
+  final kindStr = i < 0 ? '' : picked.first.substring(0, i);
+  final kind = CloudProviderKind.values.firstWhere(
+    (k) => k.name == kindStr,
+    orElse: () => CloudProviderKind.s3,
+  );
+  final label = i < 0 ? picked.first : picked.first.substring(i + 1);
+  return targets.firstWhere(
+    (t) => t.kind == kind && t.label == label,
+    orElse: () => targets.first,
+  );
+}
+
+/// Configures/clears S3 and WebDAV credentials. Embedded in the Settings page.
+class CloudCredentialsSection extends StatefulWidget {
+  const CloudCredentialsSection({super.key});
+
+  @override
+  State<CloudCredentialsSection> createState() => _CloudCredentialsSectionState();
+}
+
+class _CloudCredentialsSectionState extends State<CloudCredentialsSection> {
+  @override
+  Widget build(BuildContext context) {
+    final csp = context.watch<CloudStorageProvider>();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 3,
+      children: [
+        ConnectedCard(
+          isFirst: true,
+          isLast: false,
+          child: ActionListTile(
+            icon: Icons.cloud_outlined,
+            label: csp.s3Creds == null
+                ? tr('cloudConfigS3')
+                : '${tr('cloudConfigS3')} (${tr('cloudConfigured', args: [csp.s3Creds!.label])})',
+            onTap: () => _editS3(context, csp),
+          ),
+        ),
+        ConnectedCard(
+          isFirst: false,
+          isLast: true,
+          child: ActionListTile(
+            icon: Icons.dns_outlined,
+            label: csp.webdavCreds == null
+                ? tr('cloudConfigWebDAV')
+                : '${tr('cloudConfigWebDAV')} (${tr('cloudConfigured', args: [csp.webdavCreds!.label])})',
+            onTap: () => _editWebDAV(context, csp),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _editS3(BuildContext context, CloudStorageProvider csp) async {
+    final existing = csp.s3Creds;
+    final values = await showDialog<Map<String, dynamic>?>(
+      context: context,
+      builder: (_) => GeneratedFormModal(
+        title: tr('cloudConfigS3'),
+        items: [
+          [
+            GeneratedFormTextField('endpoint',
+                label: tr('cloudEndpoint'),
+                value: existing?.endpoint ?? '',
+                hint: 'https://s3.us-east-1.amazonaws.com'),
+          ],
+          [
+            GeneratedFormTextField('bucket',
+                label: tr('cloudBucket'), value: existing?.bucket ?? ''),
+          ],
+          [
+            GeneratedFormTextField('region',
+                label: tr('cloudRegion'),
+                value: existing?.region ?? 'us-east-1'),
+          ],
+          [
+            GeneratedFormTextField('accessKey',
+                label: tr('cloudAccessKey'), value: existing?.accessKey ?? ''),
+          ],
+          [
+            GeneratedFormTextField('secretKey',
+                label: tr('cloudSecretKey'),
+                value: existing?.secretKey ?? '',
+                password: true),
+          ],
+          [
+            GeneratedFormTextField('prefix',
+                label: tr('cloudPrefix'),
+                value: existing?.prefix ?? '',
+                required: false),
+          ],
+          [
+            GeneratedFormSwitch('pathStyle',
+                label: tr('cloudPathStyle'), value: existing?.pathStyle ?? true),
+          ],
+        ],
+      ),
+    );
+    if (values == null) return;
+    final creds = S3Creds(
+      endpoint: values['endpoint'].toString().trim(),
+      bucket: values['bucket'].toString().trim(),
+      region: values['region'].toString().trim(),
+      accessKey: values['accessKey'].toString().trim(),
+      secretKey: values['secretKey'].toString(),
+      pathStyle: values['pathStyle'] == true,
+      prefix: values['prefix'].toString().trim(),
+    );
+    if (creds.isValid) {
+      csp.s3Creds = creds;
+      if (mounted) showMessage(tr('cloudConfigured', args: [creds.label]), context);
+    } else if (mounted) {
+      showError(ObtainiumError(tr('invalidInput')), context);
+    }
+  }
+
+  Future<void> _editWebDAV(BuildContext context, CloudStorageProvider csp) async {
+    final existing = csp.webdavCreds;
+    final values = await showDialog<Map<String, dynamic>?>(
+      context: context,
+      builder: (_) => GeneratedFormModal(
+        title: tr('cloudConfigWebDAV'),
+        items: [
+          [
+            GeneratedFormTextField('url',
+                label: tr('cloudUrl'),
+                value: existing?.url ?? '',
+                hint: 'https://cloud.example.com/remote.php/dav/files/backups'),
+          ],
+          [
+            GeneratedFormTextField('username',
+                label: tr('cloudUsername'), value: existing?.username ?? ''),
+          ],
+          [
+            GeneratedFormTextField('password',
+                label: tr('cloudPassword'),
+                value: existing?.password ?? '',
+                password: true),
+          ],
+        ],
+      ),
+    );
+    if (values == null) return;
+    final creds = WebDAVCreds(
+      url: values['url'].toString().trim(),
+      username: values['username'].toString().trim(),
+      password: values['password'].toString(),
+    );
+    if (creds.isValid) {
+      csp.webdavCreds = creds;
+      if (mounted) showMessage(tr('cloudConfigured', args: [creds.label]), context);
+    } else if (mounted) {
+      showError(ObtainiumError(tr('invalidInput')), context);
+    }
   }
 }

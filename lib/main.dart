@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/providers/cloud_storage_provider.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
@@ -136,6 +137,7 @@ void main() async {
     settingsProvider: settingsProvider,
     logsProvider: logs,
   );
+  final cloudStorageProvider = CloudStorageProvider(settingsProvider: settingsProvider);
   final np = NotificationsProvider();
   await np.initialize();
 
@@ -160,6 +162,7 @@ void main() async {
       providers: [
         ChangeNotifierProvider.value(value: appsProvider),
         ChangeNotifierProvider.value(value: settingsProvider),
+        ChangeNotifierProvider.value(value: cloudStorageProvider),
         Provider.value(value: np),
         Provider.value(value: logs),
         Provider<Logger>.value(value: logger),

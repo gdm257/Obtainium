@@ -510,6 +510,10 @@ class _SettingsPageState extends State<SettingsPage> {
                           title: tr('obtainiumExport'),
                           children: const [ExportSection()],
                         ),
+                        Section(
+                          title: tr('cloudBackup'),
+                          children: const [CloudCredentialsSection()],
+                        ),
                         _buildUpdatesSection(context, showBgSection, sdk),
                         if (sourceSpecificForm != null)
                           Section(
