@@ -55,6 +55,16 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
+      - name: Load secrets from Infisical (optional)
+        if: ${{ secrets.INFISICAL_PROJECT_SLUG != '' }}
+        uses: Infisical/secrets-action@v1.0.12
+        with:
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ secrets.INFISICAL_ENV_SLUG }}
+          secret-path: ${{ secrets.INFISICAL_SECRET_PATH }}
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+
       - name: Set up signing
         run: |
           echo "$KEYSTORE_B64" | base64 -d > android/app/bikram_signer.p12
@@ -65,9 +75,9 @@ jobs:
           storeFile=bikram_signer.p12
           PROPS
         env:
-          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
-          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
-          K_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_B64: ${{ env.KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 }}
+          KS_PASS: ${{ env.KEYSTORE_PASSWORD || secrets.KEYSTORE_PASSWORD }}
+          K_ALIAS: ${{ env.KEY_ALIAS || secrets.KEY_ALIAS }}
 
       - name: Extract Version
         id: extract_version
@@ -117,8 +127,8 @@ jobs:
           rm -f "$APK_DIR"/*.sha1 "$APK_DIR"/*.idsig
           ls -l "$APK_DIR"
         env:
-          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
-          K_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KS_PASS: ${{ env.KEYSTORE_PASSWORD || secrets.KEYSTORE_PASSWORD }}
+          K_ALIAS: ${{ env.KEY_ALIAS || secrets.KEY_ALIAS }}
 
       - name: Generate GitHub Artifact Attestations
         uses: actions/attest@v4.1.0
