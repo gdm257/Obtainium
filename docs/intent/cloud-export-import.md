@@ -1,19 +1,19 @@
 # 云端导出/导入(Cloud Export/Import)—— 意图声明
 
 > 本文件是 `interview-me` 的产出物:一份已与用户确认的意图声明。下游(如 `spec-driven-development`)消费它,而非原始的模糊需求。
-> 确认日期:2026-07-23。
+> 确认日期:2026-07-27。
 
 ## 背景
 
 Obtainium 目前已实现本地导出/导入,但只能到本地文件。本需求为其增加"云端备份/恢复"能力。
 
-本仓库为长期个人 fork,会持续跟随 upstream。S3 lib 的选择在确认时改过一次,故此文件单独说明。
+本仓库为长期个人 fork,会持续跟随 upstream,可能 PR 上游。改动尽量"外挂式",集中在新增的独立文件,不碰既有导出/导入逻辑与文件命名,以便长期无痛 `git merge upstream`。
 
 ## 意图声明
 
 - Outcome(目标):
     为 Obtainium 加一个"云端备份/恢复"能力(手动触发),与现有本地导出/导入对称:
-    导出时把同名 JSON 推送到 S3 或 WebDAV;导入时从云端列出历史文件、挑一份拉回。
+    把同名 JSON 推送到当前选中的云端后端;导入时从该后端列出历史文件、挑一份拉回。
     云端保留带时间戳的历史版本(不覆盖)。
 
 - User(用户):你自己(长期个人 fork 维护者);可能 PR 上游。
@@ -32,7 +32,15 @@ Obtainium 目前已实现本地导出/导入,但只能到本地文件。本需�
 - In scope(范围内):
     - S3:手写 Signature V4(用现有 `crypto` + `http`,零新依赖)
     - WebDAV:纯 `http` 手写
-    - 「同时导出应用设置」= 全部 时,S3/WebDAV 登录信息一并进 JSON
+    - 后端模型:可同时配置多个后端(S3、WebDAV 两套凭证并存),
+      但同一时刻只有一个 active 后端生效(配置带"当前选中"指针)。
+      导出 / 导入只作用于 active 后端,不做 fan-out 推送到全部。
+    - 「同时导出应用设置」= 全部 时,所有已配置后端的凭证 + active 指针一并进 JSON,
+      恢复时还原成与导出时刻相同的多后端态。
+    - 凭证 prefs 命名带 `-creds` 后缀(与既有 source 凭证约定一致),
+      被既有 `isSecretSettingKey` 自动识别 → `generateExportJSON` 零改动(守住最高约束)。
+    - 导入时云后端凭证的恢复规则:逐 key 冲突检测——
+      设备已有该 key 则保留不覆盖;设备该 key 为空则用备份值导入。
     - 上传文件名 = 现有本地导出文件名(天然时间戳 → 历史版本)
     - 手动触发(无后台调度 / 无 WorkManager)
     - 导入:列出云端历史文件 → 用户选一份 → 下载 → 复用现有本地导入逻辑恢复
@@ -48,18 +56,22 @@ Obtainium 目前已实现本地导出/导入,但只能到本地文件。本需�
 |---|---|---|
 | 功能归属 | 长期个人 fork,持续跟随 upstream,可能 PR | 用户明确表达;约束取舍以此为锚 |
 | 触发方式 | 手动 | 避开 Android 后台调度(WorkManager),那是 merge upstream 最易冲突处 |
-| S3 / WebDAV | 两个都做 | 用户明确表达 |
+| S3 / WebDAV | 两个都实现(S3 走 SigV4,WebDAV 走纯 `http`) | 用户明确表达 |
+| 后端选择 | 多配置 + 单 active(只作用于选中后端,不 fan-out) | 用户明确表达;配多套以备切换,但每次只用一个 |
+| 「全部」档位语义 | 导出所有已配置后端完整配置 + active 指针 | "全部 = 完整还原"的承诺要求恢复成同样多后端态 |
+| 凭证 prefs 命名 | 带 `-creds` 后缀,对齐既有 secret 约定 | 唯一同时满足"凭证进 JSON"与"`generateExportJSON` 零改动"的路径 |
+| 导入凭证恢复 | 逐 key 冲突检测(已有不覆盖,空则导入) | 先在新机配好后端再拉备份的典型流;避免覆盖当前能连的云 |
 | 凭证存储 | 明文(与现有 token/source 凭证同机制) | 与既有安全模型一致;避免引入 Keystore 新依赖 |
 | 云端版本策略 | 保留历史(不覆盖) | 复用现有本地导出的时间戳命名,天然唯一 |
 | 导入选择 | 列出云端历史文件,用户选一份 | "保留历史"的全部价值在于可选哪份回滚 |
-| **S3 lib** | **手写 Signature V4(零新依赖)** | `crypto`+`http` 已在依赖中,解决了 V4 唯一难点;少一个依赖 = 少一个 upstream 冲突点与停更风险 |
+| S3 lib | 手写 Signature V4(零新依赖) | 见下 |
 
-## S3 lib 选择的勘误说明
+## S3 lib 选择
 
-最初设想用 `minio` 包。确认时核验 `pubspec.yaml` 发现 `crypto: ^3.0.7` 与 `http: ^1.6.0` 均已在依赖中——而 AWS Signature V4 的核心就是 HMAC-SHA256(由 `crypto` 提供)加上 HTTP 传输(由 `http` 提供)。本场景只需 3 个 S3 操作(`PutObject` / `GetObject` / `ListObjects`),surface 极小。因此手写 V4 在本仓库语境下优于引入 `minio`:零新依赖、与 WebDAV 代码风格统一、最贴 fork 的 merge-upstream 约束。
+最初设想用 `minio` 包。核验 `pubspec.yaml` 发现 `crypto: ^3.0.7` 与 `http: ^1.6.0` 均已在依赖中——而 AWS Signature V4 的核心就是 HMAC-SHA256(由 `crypto` 提供)加上 HTTP 传输(由 `http` 提供)。本场景只需 3 个 S3 操作(`PutObject` / `GetObject` / `ListObjects`),surface 极小。因此手写 V4 在本仓库语境下优于引入 `minio`:零新依赖、与 WebDAV 代码风格统一、最贴 fork 的 merge-upstream 约束。
 
 签名代码会配一个基于 AWS 官方测试向量的最小自检(`assert` 验证已知输入→已知签名),将"自己背 bug"的风险压到最低。
 
-## 下一步
+## 依赖说明
 
-交给 `spec-driven-development` 把本意图写成正式需求/设计:精确到新增哪些文件、在哪挂入现有导出/导入 UI、凭证设置入口放哪、签名自检怎么写,再进实现。
+复核 `pubspec.yaml`(2026-07-27):`crypto: ^3.0.7`、`http: ^1.6.0` 均在依赖中。另发现 `bcrypt: ^1.2.0` 也在,但标准 AWS SigV4 不需要它(只需 `crypto` 的 HMAC-SHA256);WebDAV 同理只需 `http`。**"零新依赖"约束在当前 pubspec 下守得住。**
