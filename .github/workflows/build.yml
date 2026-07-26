@@ -56,7 +56,9 @@ jobs:
         run: flutter pub get
 
       - name: Load secrets from Infisical (optional)
-        if: ${{ secrets.INFISICAL_PROJECT_SLUG != '' }}
+        if: ${{ env.INFISICAL_PROJECT_SLUG != '' }}
+        env:
+          INFISICAL_PROJECT_SLUG: ${{ secrets.INFISICAL_PROJECT_SLUG }}
         uses: Infisical/secrets-action@v1.0.12
         with:
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
