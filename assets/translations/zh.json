@@ -783,5 +783,23 @@
     "action": {
         "one": "Action",
         "other": "Actions"
-    }
+    },
+    "cloudBackupConfigTitle": "云备份设置",
+    "cloudBackupActiveBackend": "当前后端",
+    "cloudBackendNone": "无",
+    "cloudBackupS3Endpoint": "S3 端点",
+    "cloudBackupS3Bucket": "S3 存储桶",
+    "cloudBackupS3Region": "S3 区域",
+    "cloudBackupPrefix": "路径前缀",
+    "cloudBackupS3AccessKey": "S3 访问密钥 ID",
+    "cloudBackupS3Secret": "S3 秘密访问密钥",
+    "cloudBackupWebDavUrl": "WebDAV 基础 URL",
+    "cloudBackupWebDavUser": "WebDAV 用户名",
+    "cloudBackupWebDavPassword": "WebDAV 密码",
+    "cloudExport": "导出到云端",
+    "cloudImport": "从云端导入",
+    "cloudBackupConfig": "云备份设置",
+    "exportedToCloud": "已导出到云端：{}",
+    "cloudBackupsTitle": "云备份",
+    "noActiveCloudBackend": "未启用任何云备份后端。"
 }

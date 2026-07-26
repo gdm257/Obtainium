@@ -7,6 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:obtainium/components/app_bottom_sheet.dart';
 import 'package:obtainium/components/backup_import_sheet.dart';
+import 'package:obtainium/components/cloud_backup_config_dialog.dart';
+import 'package:obtainium/services/cloud_backup/cloud_backup_actions.dart';
+import 'package:obtainium/services/cloud_backup/cloud_backup_prefs.dart';
 import 'package:obtainium/components/app_dropdown_field.dart';
 import 'package:obtainium/components/custom_app_bar.dart';
 import 'package:obtainium/components/generated_form_renderer.dart';
@@ -225,6 +228,105 @@ class _ImportExportPageState extends State<ImportExportPage> {
       }
     }
 
+    final cloudActions = CloudBackupActions(appsProvider, settingsProvider);
+
+    Future<void> openCloudConfig() async {
+      hapticSelection();
+      await CloudBackupConfigDialog.show(context, settingsProvider);
+      if (mounted) {
+        setState(() {});
+      }
+    }
+
+    Future<void> runCloudExport() async {
+      hapticSelection();
+      if (!cloudActions.hasActiveBackend) {
+        showError(ObtainiumError(tr('noActiveCloudBackend')));
+        return;
+      }
+      setState(() {
+        importInProgress = true;
+      });
+      try {
+        final filename = await cloudActions.exportToCloud();
+        showMessage(tr('exportedToCloud', args: [filename]));
+      } catch (e) {
+        showError(e);
+      } finally {
+        if (mounted) {
+          setState(() {
+            importInProgress = false;
+          });
+        }
+      }
+    }
+
+    Future<void> runCloudImport() async {
+      hapticSelection();
+      if (!cloudActions.hasActiveBackend) {
+        showError(ObtainiumError(tr('noActiveCloudBackend')));
+        return;
+      }
+      setState(() {
+        importInProgress = true;
+      });
+      try {
+        final entries = await cloudActions.listBackups();
+        if (entries.isEmpty) {
+          showError(ObtainiumError(tr('noResults')));
+          return;
+        }
+        if (!context.mounted) {
+          return;
+        }
+        final CloudBackupEntry? entry = await showDialog<CloudBackupEntry>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: Text(tr('cloudBackupsTitle')),
+            contentPadding: const EdgeInsets.fromLTRB(0, 16, 0, 0),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: entries.length,
+                itemBuilder: (_, i) {
+                  final e = entries[i];
+                  return ListTile(
+                    title: Text(e.name),
+                    subtitle: Text(e.ref),
+                    onTap: () => Navigator.of(context).pop(e),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(
+                  MaterialLocalizations.of(context).cancelButtonLabel,
+                ),
+              ),
+            ],
+          ),
+        );
+        if (entry == null) {
+          return;
+        }
+        final backupData = await cloudActions.downloadForImport(entry);
+        if (!context.mounted) {
+          return;
+        }
+        await importObtainiumBackupData(backupData);
+      } catch (e) {
+        showError(e);
+      } finally {
+        if (mounted) {
+          setState(() {
+            importInProgress = false;
+          });
+        }
+      }
+    }
     final ColorScheme impScheme = Theme.of(context).colorScheme;
 
     /// Folder picker rows with a title + subtitle (more vertical air).
@@ -667,6 +769,44 @@ class _ImportExportPageState extends State<ImportExportPage> {
                                           : runObtainiumExport,
                                       child: Text(tr('obtainiumExport')),
                                     ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Padding(
+                              padding: importPageCardRowPadding,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: TextButton(
+                                      style: outlineButtonStyle,
+                                      onPressed: importInProgress
+                                          ? null
+                                          : runCloudImport,
+                                      child: Text(tr('cloudImport')),
+                                    ),
+                                  ),
+                                  const SizedBox(
+                                    width: importPageCardRowItemGap,
+                                  ),
+                                  Expanded(
+                                    child: TextButton(
+                                      style: outlineButtonStyle,
+                                      onPressed: importInProgress
+                                          ? null
+                                          : runCloudExport,
+                                      child: Text(tr('cloudExport')),
+                                    ),
+                                  ),
+                                  const SizedBox(
+                                    width: importPageCardRowItemGap,
+                                  ),
+                                  IconButton(
+                                    tooltip: tr('cloudBackupConfig'),
+                                    icon: const Icon(Icons.cloud_outlined),
+                                    onPressed: importInProgress
+                                        ? null
+                                        : openCloudConfig,
                                   ),
                                 ],
                               ),

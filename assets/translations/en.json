@@ -811,5 +811,23 @@
     "action": {
         "one": "Action",
         "other": "Actions"
-    }
+    },
+    "cloudBackupConfigTitle": "Cloud Backup Settings",
+    "cloudBackupActiveBackend": "Active backend",
+    "cloudBackendNone": "None",
+    "cloudBackupS3Endpoint": "S3 endpoint",
+    "cloudBackupS3Bucket": "S3 bucket",
+    "cloudBackupS3Region": "S3 region",
+    "cloudBackupPrefix": "Path prefix",
+    "cloudBackupS3AccessKey": "S3 access key ID",
+    "cloudBackupS3Secret": "S3 secret access key",
+    "cloudBackupWebDavUrl": "WebDAV base URL",
+    "cloudBackupWebDavUser": "WebDAV username",
+    "cloudBackupWebDavPassword": "WebDAV password",
+    "cloudExport": "Export to cloud",
+    "cloudImport": "Import from cloud",
+    "cloudBackupConfig": "Cloud backup settings",
+    "exportedToCloud": "Exported to cloud: {}",
+    "cloudBackupsTitle": "Cloud backups",
+    "noActiveCloudBackend": "No cloud backup backend is active."
 }

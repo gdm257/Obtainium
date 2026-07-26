@@ -811,5 +811,23 @@
     "action": {
         "one": "操作",
         "other": "操作"
-    }
+    },
+    "cloudBackupConfigTitle": "クラウドバックアップ設定",
+    "cloudBackupActiveBackend": "使用するバックエンド",
+    "cloudBackendNone": "なし",
+    "cloudBackupS3Endpoint": "S3 エンドポイント",
+    "cloudBackupS3Bucket": "S3 バケット",
+    "cloudBackupS3Region": "S3 リージョン",
+    "cloudBackupPrefix": "パスプレフィックス",
+    "cloudBackupS3AccessKey": "S3 アクセスキー ID",
+    "cloudBackupS3Secret": "S3 シークレットアクセスキー",
+    "cloudBackupWebDavUrl": "WebDAV ベース URL",
+    "cloudBackupWebDavUser": "WebDAV ユーザー名",
+    "cloudBackupWebDavPassword": "WebDAV パスワード",
+    "cloudExport": "クラウドへエクスポート",
+    "cloudImport": "クラウドからインポート",
+    "cloudBackupConfig": "クラウドバックアップ設定",
+    "exportedToCloud": "クラウドにエクスポートしました: {}",
+    "cloudBackupsTitle": "クラウドバックアップ",
+    "noActiveCloudBackend": "クラウドバックエンドが選択されていません。"
 }

@@ -783,5 +783,23 @@
     "action": {
         "one": "Action",
         "other": "Actions"
-    }
+    },
+    "cloudBackupConfigTitle": "雲端備份設定",
+    "cloudBackupActiveBackend": "目前後端",
+    "cloudBackendNone": "無",
+    "cloudBackupS3Endpoint": "S3 端點",
+    "cloudBackupS3Bucket": "S3 儲存桶",
+    "cloudBackupS3Region": "S3 區域",
+    "cloudBackupPrefix": "路徑前置詞",
+    "cloudBackupS3AccessKey": "S3 存取金鑰 ID",
+    "cloudBackupS3Secret": "S3 秘密存取金鑰",
+    "cloudBackupWebDavUrl": "WebDAV 基礎 URL",
+    "cloudBackupWebDavUser": "WebDAV 使用者名稱",
+    "cloudBackupWebDavPassword": "WebDAV 密碼",
+    "cloudExport": "匯出至雲端",
+    "cloudImport": "自雲端匯入",
+    "cloudBackupConfig": "雲端備份設定",
+    "exportedToCloud": "已匯出至雲端：{}",
+    "cloudBackupsTitle": "雲端備份",
+    "noActiveCloudBackend": "未啟用任何雲端備份後端。"
 }
