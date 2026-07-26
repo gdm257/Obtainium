@@ -282,16 +282,16 @@ void main() {
       });
 
       requested.clear();
-      await getInstalledInfo('dev.bikram.obtainx');
-      expect(requested, const ['dev.bikram.obtainx']);
+      await getInstalledInfo('dev.gdm257.obtainx');
+      expect(requested, const ['dev.gdm257.obtainx']);
 
       requested.clear();
-      await getInstalledInfo('dev.bikram.obtainx', includeOwnDebugBuild: true);
+      await getInstalledInfo('dev.gdm257.obtainx', includeOwnDebugBuild: true);
       expect(
         requested,
         kDebugMode
-            ? const ['dev.bikram.obtainx.debug', 'dev.bikram.obtainx']
-            : const ['dev.bikram.obtainx'],
+            ? const ['dev.gdm257.obtainx.debug', 'dev.gdm257.obtainx']
+            : const ['dev.gdm257.obtainx'],
       );
     },
     skip:

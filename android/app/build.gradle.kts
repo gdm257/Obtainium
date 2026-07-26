@@ -50,7 +50,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "dev.bikram.obtainx"
+        applicationId = "dev.gdm257.obtainx"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 26
@@ -69,7 +69,7 @@ android {
         create("fdroid") {
             dimension = "default"
             // Intentionally NO applicationIdSuffix: the F-Droid build shares the
-            // GitHub build's applicationId (dev.bikram.obtainx) and signing key so
+            // GitHub build's applicationId (dev.gdm257.obtainx) and signing key so
             // updates cross between channels seamlessly. This relies on F-Droid
             // publishing OUR signed APK via the reproducible-build path (Builds.binary
             // in the fdroiddata recipe) — do NOT re-add a suffix. The flavor still
