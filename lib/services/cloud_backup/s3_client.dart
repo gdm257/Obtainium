@@ -24,7 +24,8 @@ class S3Exception implements Exception {
 /// pass a recording fake. The clock is also injectable so signing is
 /// deterministic under test.
 class S3Client {
-  S3Client(this.httpClient, {DateTime Function()? now}) : _now = now ?? DateTime.now;
+  S3Client(this.httpClient, {DateTime Function()? now})
+    : _now = now ?? DateTime.now;
 
   final http.Client httpClient;
   final DateTime Function() _now;
@@ -113,10 +114,12 @@ class S3Client {
     Map<String, String> query = const {},
   }) async {
     final path = objectKey.isEmpty ? '/$bucket' : '/$bucket/$objectKey';
-    final url = endpoint.replace(path: path, queryParameters: query.isEmpty ? null : query);
+    final url = endpoint.replace(
+      path: path,
+      queryParameters: query.isEmpty ? null : query,
+    );
 
-    final payloadHash =
-        body == null ? emptyStringSha256Hex : sha256Hex(body);
+    final payloadHash = body == null ? emptyStringSha256Hex : sha256Hex(body);
 
     final now = _now().toUtc();
     final amzDate = _amzDate(now);

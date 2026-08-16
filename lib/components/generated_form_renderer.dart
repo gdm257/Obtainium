@@ -11,6 +11,7 @@ import 'package:obtainium/components/app_dropdown_field.dart';
 import 'package:obtainium/components/category_action_chip.dart';
 import 'package:obtainium/components/generated_form_model.dart';
 import 'package:obtainium/components/theme_accent_settings_section.dart';
+import 'package:obtainium/components/ui_widgets.dart' show AppSwitch;
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/theme/app_form_field_styles.dart';
@@ -1111,7 +1112,7 @@ class _GeneratedFormState extends State<GeneratedForm> {
                         switchHelpIcon
                       else
                         const SizedBox(width: 8),
-                      Switch(
+                      AppSwitch(
                         value: values[fieldKey],
                         onChanged: switchItem.disabled
                             ? null

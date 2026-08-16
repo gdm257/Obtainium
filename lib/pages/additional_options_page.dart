@@ -45,17 +45,16 @@ Future<bool> persistAdditionalOptionsForm({
     app.additionalSettings,
   );
   syncVersionStringSourceSettings(originalSettings);
-  if (originalSettings['versionDetection'] == 'versionCode' ||
-      originalSettings['useVersionCodeAsOSVersion'] == true) {
-    originalSettings['versionDetection'] = 'versionCode';
-    originalSettings['useVersionCodeAsOSVersion'] = true;
-  } else {
-    originalSettings['useVersionCodeAsOSVersion'] = false;
-  }
+  normalizeVersionDetectionSettings(
+    originalSettings,
+    promoteLegacyBoolean: true,
+  );
   app = app.copyWith(additionalSettings: {...originalSettings, ...formValues});
   syncVersionStringSourceSettings(app.additionalSettings);
-  app.additionalSettings['useVersionCodeAsOSVersion'] =
-      app.additionalSettings['versionDetection'] == 'versionCode';
+  normalizeVersionDetectionSettings(app.additionalSettings);
+  if (app.additionalSettings.containsKey(installStatusResetKey)) {
+    app = resetInstallStatusToDeviceVersion(app, appInMem.installedInfo);
+  }
   if (source is GitHub) {
     if (!source.canVerifyAttestations(
       app.additionalSettings,
@@ -73,17 +72,8 @@ Future<bool> persistAdditionalOptionsForm({
   }
 
   final bool versionDetectionPreviouslyActive =
-      originalSettings['versionDetection'] == 'auto' ||
-      originalSettings['versionDetection'] == 'standard' ||
-      originalSettings['versionDetection'] == 'versionCode' ||
-      originalSettings['versionDetection'] == true ||
-      originalSettings['versionDetection'] == null;
-  final bool versionDetectionCurrentlyActive =
-      app.additionalSettings['versionDetection'] == 'auto' ||
-      app.additionalSettings['versionDetection'] == 'standard' ||
-      app.additionalSettings['versionDetection'] == 'versionCode' ||
-      app.additionalSettings['versionDetection'] == true ||
-      app.additionalSettings['versionDetection'] == null;
+      versionDetectionModeOf(originalSettings) != VersionDetectionMode.pseudo;
+  final bool versionDetectionCurrentlyActive = app.usesStandardVersionDetection;
 
   final bool versionDetectionEnabled =
       versionDetectionCurrentlyActive && !versionDetectionPreviouslyActive;
@@ -114,10 +104,9 @@ Future<bool> persistAdditionalOptionsForm({
   }
 
   if (versionDetectionEnabled) {
-    if (app.additionalSettings['versionDetection'] != 'auto' &&
-        app.additionalSettings['versionDetection'] != 'standard' &&
-        app.additionalSettings['versionDetection'] != 'versionCode') {
-      app.additionalSettings['versionDetection'] = 'auto';
+    if (!app.usesStandardVersionDetection) {
+      app.additionalSettings['versionDetection'] =
+          VersionDetectionMode.auto.key;
     }
     if (app.additionalSettings['releaseDateAsVersion'] == true) {
       app.additionalSettings['versionStringSource'] =
@@ -125,15 +114,14 @@ Future<bool> persistAdditionalOptionsForm({
       syncVersionStringSourceSettings(app.additionalSettings);
     }
   } else if (versionDetectionDisabled && app.installedVersion != null) {
-    final String? realInstalledVersion =
-        app.additionalSettings['useVersionCodeAsOSVersion'] == true
+    final String? realInstalledVersion = app.usesVersionCodeAsOsVersion
         ? appInMem.installedInfo?.versionCode.toString()
         : appInMem.installedInfo?.versionName;
     if (realInstalledVersion != null) {
       if (reconcileVersionDifferences(
             realInstalledVersion,
             app.latestVersion,
-          )?.key !=
+          )?.areEqual !=
           true) {
         app = app.copyWith(installedVersion: app.latestVersion);
       }
@@ -205,29 +193,14 @@ class _AdditionalOptionsPageState extends State<AdditionalOptionsPage> {
     final Map<String, dynamic> appAdditionalSettings =
         Map<String, dynamic>.from(app.additionalSettings);
     syncVersionStringSourceSettings(appAdditionalSettings);
-    // Defensively normalize versionDetection to the string enum the dropdown
-    // expects. App.fromJson normally migrates legacy bool values, but it falls
-    // back to raw JSON if that migration throws — a bool here would crash the
-    // DropdownButton ("no item with value: false"). false→pseudo / true→auto
-    // preserves the app's actual behavior; anything unrecognized → auto.
-    final dynamic vd = appAdditionalSettings['versionDetection'];
-    if (vd == false) {
-      appAdditionalSettings['versionDetection'] = 'pseudo';
-    } else if (vd == true) {
-      appAdditionalSettings['versionDetection'] = 'auto';
-    } else if (vd != 'auto' &&
-        vd != 'standard' &&
-        vd != 'pseudo' &&
-        vd != 'versionCode') {
-      appAdditionalSettings['versionDetection'] = 'auto';
-    }
-    if (appAdditionalSettings['versionDetection'] == 'versionCode' ||
-        appAdditionalSettings['useVersionCodeAsOSVersion'] == true) {
-      appAdditionalSettings['versionDetection'] = 'versionCode';
-      appAdditionalSettings['useVersionCodeAsOSVersion'] = true;
-    } else {
-      appAdditionalSettings['useVersionCodeAsOSVersion'] = false;
-    }
+    // Normalize versionDetection to one of the dropdown's own values. App.fromJson
+    // normally migrates legacy encodings, but it falls back to raw JSON if that
+    // migration throws — a bool here would crash the DropdownButton ("no item
+    // with value: false").
+    normalizeVersionDetectionSettings(
+      appAdditionalSettings,
+      promoteLegacyBoolean: true,
+    );
     final SettingsProvider settingsProvider = context.read<SettingsProvider>();
     final AppSource source = SourceProvider().getSource(
       app.url,

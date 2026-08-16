@@ -37,12 +37,16 @@ String canonicalRequest({
   final String canonicalUri = _encodePath(rawPath);
 
   // Canonical query string: URI-encoded k=v pairs sorted by key name.
-  final List<String> pairs = uri.queryParametersAll.entries.map((e) {
-    return e.value
-        .map((v) => '${_encode(e.key)}=${_encode(v)}')
-        .toList();
-  }).expand((p) => p).toList()
-    ..sort();
+  final List<String> pairs =
+      uri.queryParametersAll.entries
+          .map((e) {
+            return e.value
+                .map((v) => '${_encode(e.key)}=${_encode(v)}')
+                .toList();
+          })
+          .expand((p) => p)
+          .toList()
+        ..sort();
   final String canonicalQueryString = pairs.join('&');
 
   // Canonical + signed headers: lowercase names, trimmed values, sorted.
@@ -129,9 +133,10 @@ String signature({
   final List<int> kRegion = _hmac(kDate, utf8.encode(region));
   final List<int> kService = _hmac(kRegion, utf8.encode(service));
   final List<int> kSigning = _hmac(kService, utf8.encode('aws4_request'));
-  return _hmac(kSigning, utf8.encode(stringToSign))
-      .map((b) => b.toRadixString(16).padLeft(2, '0'))
-      .join();
+  return _hmac(
+    kSigning,
+    utf8.encode(stringToSign),
+  ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 }
 
 List<int> _hmac(List<int> key, List<int> data) =>
@@ -154,7 +159,8 @@ String authorizationHeader({
 /// true when our signature matches the published value. Call from a debug path
 /// or from a test; never asserts on a real S3 call without it.
 bool selfCheck() {
-  const cr = 'GET\n'
+  const cr =
+      'GET\n'
       '/\n'
       '\n'
       'host:example.amazonaws.com\n'

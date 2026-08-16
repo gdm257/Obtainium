@@ -41,33 +41,45 @@ void main() {
   });
 
   group('putObject', () {
-    test('issues a PUT to the path-style object URL with a signed AWS4 header', () async {
-      final body = Uint8List.fromList(utf8.encode('hello cloud'));
-      await s3.putObject(
-        endpoint: Uri.parse(endpoint),
-        bucket: bucket,
-        region: region,
-        objectKey: 'backups/obtainx-export-2026.json',
-        body: body,
-        accessKey: accessKey,
-        secretKey: secretKey,
-      );
+    test(
+      'issues a PUT to the path-style object URL with a signed AWS4 header',
+      () async {
+        final body = Uint8List.fromList(utf8.encode('hello cloud'));
+        await s3.putObject(
+          endpoint: Uri.parse(endpoint),
+          bucket: bucket,
+          region: region,
+          objectKey: 'backups/obtainx-export-2026.json',
+          body: body,
+          accessKey: accessKey,
+          secretKey: secretKey,
+        );
 
-      final req = http_.lastRequest!;
-      expect(req.method, 'PUT');
-      expect(req.url.toString(), '$endpoint/$bucket/backups/obtainx-export-2026.json');
-      expect(req.bodyBytes, body);
+        final req = http_.lastRequest!;
+        expect(req.method, 'PUT');
+        expect(
+          req.url.toString(),
+          '$endpoint/$bucket/backups/obtainx-export-2026.json',
+        );
+        expect(req.bodyBytes, body);
 
-      final headers = req.headers;
-      expect(headers['Host'], 's3.us-east-1.amazonaws.com');
-      expect(headers['x-amz-date'], '20150830T123600Z');
-      expect(headers['x-amz-content-sha256'], sha256Hex(body));
-      final auth = headers['Authorization']!;
-      expect(auth.startsWith('AWS4-HMAC-SHA256 '), isTrue);
-      expect(auth, contains('Credential=$accessKey/20150830/$region/s3/aws4_request'));
-      expect(auth, contains('SignedHeaders=host;x-amz-content-sha256;x-amz-date'));
-      expect(auth, contains('Signature='));
-    });
+        final headers = req.headers;
+        expect(headers['Host'], 's3.us-east-1.amazonaws.com');
+        expect(headers['x-amz-date'], '20150830T123600Z');
+        expect(headers['x-amz-content-sha256'], sha256Hex(body));
+        final auth = headers['Authorization']!;
+        expect(auth.startsWith('AWS4-HMAC-SHA256 '), isTrue);
+        expect(
+          auth,
+          contains('Credential=$accessKey/20150830/$region/s3/aws4_request'),
+        );
+        expect(
+          auth,
+          contains('SignedHeaders=host;x-amz-content-sha256;x-amz-date'),
+        );
+        expect(auth, contains('Signature='));
+      },
+    );
 
     test('throws on a non-2xx response', () async {
       http_.nextStatus = 403;
@@ -122,14 +134,16 @@ void main() {
 
   group('listObjects', () {
     test('GETs ?list-type=2 and parses object keys from XML', () async {
-      http_.nextBody = Uint8List.fromList(utf8.encode(
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
-        '<Contents><Key>backups/a.json</Key></Contents>'
-        '<Contents><Key>backups/b.json</Key></Contents>'
-        '<CommonPrefixes><Prefix>logs/</Prefix></CommonPrefixes>'
-        '</ListBucketResult>',
-      ));
+      http_.nextBody = Uint8List.fromList(
+        utf8.encode(
+          '<?xml version="1.0" encoding="UTF-8"?>'
+          '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+          '<Contents><Key>backups/a.json</Key></Contents>'
+          '<Contents><Key>backups/b.json</Key></Contents>'
+          '<CommonPrefixes><Prefix>logs/</Prefix></CommonPrefixes>'
+          '</ListBucketResult>',
+        ),
+      );
       final keys = await s3.listObjects(
         endpoint: Uri.parse(endpoint),
         bucket: bucket,

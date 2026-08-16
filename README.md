@@ -8,9 +8,29 @@ ObtainX is a modern and supercharged fork of Obtainium. Re-engineered with a stu
 > Curious how ObtainX stacks up against Obtainium? Check out my side-by-side [ObtainX vs Obtainium comparison](docs/Difference_with_Obtainium.md) featuring full interface screenshots.
 
 <p align="center">
-<strong>Featured by HowToMen: Best Android Apps - May 2026! 🎊</strong>
+  <!-- Stack / Technical Chips -->
+  <img alt="Android API" src="https://img.shields.io/badge/Api%2021+-50f270?logo=android&logoColor=black&style=for-the-badge"/>
+  <img alt="Flutter" src="https://img.shields.io/badge/Flutter-02569B?logo=flutter&logoColor=white&style=for-the-badge"/>
+  <img alt="Dart" src="https://img.shields.io/badge/Dart-0175C2?logo=dart&logoColor=white&style=for-the-badge"/>
+  <img alt="Material You" src="https://custom-icon-badges.demolab.com/badge/material%20you-lightblue?style=for-the-badge&logoColor=333&logo=material-you"/>
+  <br/>
+  <!-- Dynamic Lines of Code Badge -->
+  <img alt="Lines of Code" src="https://img.shields.io/endpoint?url=https%3A%2F%2Ftokei.kojix2.net%2Fbadge%2Fgithub%2Fbikram-agarwal%2FObtainX%2Flines&style=for-the-badge&color=aeff4d&labelColor=4b731a&label=Lines%20of%20code"/>
+  <!-- Forks -->
+  <a href="https://github.com/bikram-agarwal/ObtainX/network/members"><img alt="Forks" src="https://img.shields.io/github/forks/bikram-agarwal/ObtainX?color=DAA520&style=for-the-badge&labelColor=664D0F"/></a>
+  <!-- Stars -->
+  <a href="https://github.com/bikram-agarwal/ObtainX/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/bikram-agarwal/ObtainX?color=ffff00&style=for-the-badge&labelColor=a1a116"/></a>
+  <a href="https://github.com/bikram-agarwal/ObtainX/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/bikram-agarwal/ObtainX/total?color=00bcd4&style=for-the-badge&labelColor=006064"/></a>
+  <br/>
+  <!-- Distribution Badges -->
+  <a href="https://github.com/bikram-agarwal/ObtainX/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/bikram-agarwal/ObtainX?color=a1168e&include_prereleases&logo=github&style=for-the-badge&labelColor=700f63"/></a>
+  <a href="https://f-droid.org/packages/dev.bikram.obtainx"><img alt="F-Droid" src="https://img.shields.io/f-droid/v/dev.bikram.obtainx?color=a1168e&logo=FDROID&style=for-the-badge&labelColor=700f63"/></a>
+  <br/>
+  <a href="https://trendshift.io/repositories/38553" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/38553/daily?language=Dart" alt="bikram-agarwal%2FObtainX | Trendshift" width="250" height="55"/></a>
 </p>
+
 <p align="center">
+<strong>Featured by HowToMen: Best Android Apps - May 2026! 🎊</strong>
   <a href="https://youtu.be/B59glf2bweo?si=8rTAqBJiW9uwtpTT&t=468"><img width="50%" alt="ObtainX: Best Android Apps - May 2026!" src="docs/assets/feature_htm.webp" /></a>
 </p>
 

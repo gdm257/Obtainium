@@ -288,13 +288,13 @@ class AddAppPageState extends State<AddAppPage> {
   // ─── Search mode state ─────────────────────────────────────────────────
   bool searching = false;
   String searchQuery = '';
-  // Cache of past inline-search results. Instance-scoped (so it's discarded
-  // when leaving the page, rather than serving stale results across sessions)
-  // and size-bounded so it can't grow unbounded. The key includes the selected
-  // sources, and searches that prompt for per-source options are never cached
-  // (their results depend on that dialog input — see runInlineSearch).
-  final Map<String, Map<String, MapEntry<String, List<String>>>> _searchCache =
-      {};
+  // Cache past inline-search results for the lifetime of this app process,
+  // including when the Add page is disposed and reopened. It remains bounded
+  // so it cannot grow indefinitely. The key includes the selected sources, and
+  // searches that prompt for per-source options are never cached because their
+  // results depend on that dialog input (see runInlineSearch).
+  static final Map<String, Map<String, MapEntry<String, List<String>>>>
+  _searchCache = {};
   static const int _searchCacheMaxEntries = 50;
   // Searchable-source names the user has selected (null = not yet initialised)
   Set<String>? _searchSelectedStores;
@@ -666,6 +666,9 @@ class AddAppPageState extends State<AddAppPage> {
       style: launcherTextStyle,
       textAlignVertical: TextAlignVertical.center,
       onTap: onTap,
+      onTapOutside: (_) {
+        _urlFieldFocusNode.unfocus();
+      },
       onChanged: (String text) {
         final bool valid = _isUrlInputValid(text);
         changeUserInput(text, valid, false);
@@ -680,6 +683,7 @@ class AddAppPageState extends State<AddAppPage> {
       keyboardType: TextInputType.url,
       textInputAction: TextInputAction.go,
       onSubmitted: (_) {
+        _urlFieldFocusNode.unfocus();
         if (!submitDisabled) {
           hapticSelection();
           onSubmit();
@@ -1314,6 +1318,7 @@ class AddAppPageState extends State<AddAppPage> {
 
     Future<void> addApp({bool resetUserInputAfter = false}) async {
       bool appWasAdded = false;
+      clearInputFocus();
       setState(() {
         gettingAppInfo = true;
       });
@@ -1426,7 +1431,7 @@ class AddAppPageState extends State<AddAppPage> {
             throw ObtainiumError(tr('appAlreadyAdded'));
           }
           app.additionalSettings['useVersionCodeAsOSVersion'] =
-              app.additionalSettings['versionDetection'] == 'versionCode';
+              app.versionDetectionMode == VersionDetectionMode.versionCode;
           if (app.additionalSettings['trackOnly'] == true) {
             app = app.copyWith(installedVersion: null);
             if (isTempId(app)) {
@@ -1441,9 +1446,7 @@ class AddAppPageState extends State<AddAppPage> {
               );
               if (installedInfo != null) {
                 app = app.copyWith(
-                  installedVersion:
-                      app.additionalSettings['useVersionCodeAsOSVersion'] ==
-                          true
+                  installedVersion: app.usesVersionCodeAsOsVersion
                       ? installedInfo.versionCode.toString()
                       : installedInfo.versionName,
                 );
@@ -1454,8 +1457,7 @@ class AddAppPageState extends State<AddAppPage> {
                     true;
               }
             }
-          } else if (app.additionalSettings['versionDetection'] == 'pseudo' ||
-              app.additionalSettings['versionDetection'] == false) {
+          } else if (!app.usesStandardVersionDetection) {
             app = app.copyWith(installedVersion: app.latestVersion);
           }
           app = app.copyWith(categories: pickedCategories);
@@ -1489,12 +1491,22 @@ class AddAppPageState extends State<AddAppPage> {
         showError(e);
       } finally {
         if (mounted) {
+          final bool returnedToLauncher =
+              appWasAdded &&
+              widget._initialMode == _AddMode.launcher &&
+              _mode != _AddMode.launcher;
           setState(() {
             gettingAppInfo = false;
             if (appWasAdded || resetUserInputAfter) {
               _resetUrlModeInput();
             }
+            if (returnedToLauncher) {
+              _mode = _AddMode.launcher;
+            }
           });
+          if (returnedToLauncher) {
+            _notifyModeChanged();
+          }
         }
       }
     }
@@ -2257,6 +2269,7 @@ class AddAppPageState extends State<AddAppPage> {
         final subtitle = e.value.value.join(' ').toLowerCase();
         return title.contains(filterQ) || subtitle.contains(filterQ);
       }).toList();
+      final ColorScheme searchResultColorScheme = Theme.of(context).colorScheme;
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2319,69 +2332,111 @@ class AddAppPageState extends State<AddAppPage> {
               });
             }
 
+            void proceedWithSelection() {
+              clearInputFocus();
+              changeUserInput(
+                displayTitle,
+                true,
+                false,
+                updateUrlInput: true,
+                overrideSource: sourceName,
+              );
+              setState(() {
+                _byUrlOpenedFromSearchPick = true;
+                _mode = _AddMode.byUrl;
+              });
+            }
+
+            void openExternalUrl() {
+              if (displayTitle.isNotEmpty) {
+                unawaited(
+                  launchUrlString(
+                    displayTitle,
+                    mode: LaunchMode.externalApplication,
+                  ),
+                );
+              }
+            }
+
             return Card(
               margin: const EdgeInsets.only(bottom: 6),
-              child: ListTile(
-                selected: widget._searchAddsMultipleApps && selected,
-                leading: SizedBox(
-                  width: 32,
-                  child: Center(child: _searchSourceIcon(sourceName)),
-                ),
-                title: subtitleLines.isNotEmpty
-                    ? Text(
-                        subtitleLines.join(' · '),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      )
-                    : Text(
-                        displayTitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                subtitle: subtitleLines.isNotEmpty
-                    ? Text(
-                        displayTitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      )
-                    : null,
-                trailing: widget._searchAddsMultipleApps
-                    ? SizedBox.square(
-                        dimension: 28,
-                        child: Checkbox(
-                          value: selected,
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          visualDensity: const VisualDensity(
-                            horizontal: -4,
-                            vertical: -4,
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                children: [
+                  ListTile(
+                    selected: widget._searchAddsMultipleApps && selected,
+                    leading: SizedBox(
+                      width: 32,
+                      child: Center(child: _searchSourceIcon(sourceName)),
+                    ),
+                    title: subtitleLines.isNotEmpty
+                        ? Text(
+                            subtitleLines.join(' · '),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          )
+                        : Text(
+                            displayTitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          onChanged: (value) {
-                            updateResultSelection(value ?? false);
-                          },
+                    subtitle: subtitleLines.isNotEmpty
+                        ? Text(
+                            displayTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          )
+                        : null,
+                    trailing: widget._searchAddsMultipleApps
+                        ? const SizedBox.square(dimension: 28)
+                        : const SizedBox.square(dimension: 16),
+                    onTap: openExternalUrl,
+                  ),
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                    width: widget._searchAddsMultipleApps ? 60 : 48,
+                    child: Material(
+                      color: Color.alphaBlend(
+                        searchResultColorScheme.primary.withValues(alpha: 0.05),
+                        searchResultColorScheme.surfaceContainerLow,
+                      ),
+                      child: InkWell(
+                        onTap: widget._searchAddsMultipleApps
+                            ? () {
+                                updateResultSelection(!selected);
+                              }
+                            : proceedWithSelection,
+                        child: Center(
+                          child: widget._searchAddsMultipleApps
+                              ? SizedBox.square(
+                                  dimension: 28,
+                                  child: Checkbox(
+                                    value: selected,
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    visualDensity: const VisualDensity(
+                                      horizontal: -4,
+                                      vertical: -4,
+                                    ),
+                                    onChanged: (value) {
+                                      updateResultSelection(value ?? false);
+                                    },
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.arrow_forward_ios_rounded,
+                                  size: 16,
+                                  color:
+                                      searchResultColorScheme.onSurfaceVariant,
+                                ),
                         ),
-                      )
-                    : const Icon(Icons.chevron_right_rounded, size: 20),
-                onTap: () {
-                  if (widget._searchAddsMultipleApps) {
-                    updateResultSelection(!selected);
-                    return;
-                  }
-                  // Fill URL mode with selected result and switch to it
-                  clearInputFocus();
-                  changeUserInput(
-                    displayTitle,
-                    true,
-                    false,
-                    updateUrlInput: true,
-                    overrideSource: sourceName,
-                  );
-                  setState(() {
-                    _byUrlOpenedFromSearchPick = true;
-                    _mode = _AddMode.byUrl;
-                  });
-                },
+                      ),
+                    ),
+                  ),
+                ],
               ),
             );
           }),

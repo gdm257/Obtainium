@@ -23,7 +23,8 @@ class _RecordingClient extends http.BaseClient {
   }
 }
 
-S3Client _s3(_RecordingClient c) => S3Client(c, now: () => DateTime.utc(2015, 8, 30, 12, 36, 0));
+S3Client _s3(_RecordingClient c) =>
+    S3Client(c, now: () => DateTime.utc(2015, 8, 30, 12, 36, 0));
 WebDavClient _webdav(_RecordingClient c) => WebDavClient(c);
 
 const s3Config = CloudBackupConfig(
@@ -80,7 +81,10 @@ void main() {
     });
 
     test('throws when no backend is active', () async {
-      final svc = CloudBackupService(_s3(_RecordingClient()), _webdav(_RecordingClient()));
+      final svc = CloudBackupService(
+        _s3(_RecordingClient()),
+        _webdav(_RecordingClient()),
+      );
       expect(
         () => svc.upload(
           const CloudBackupConfig(active: CloudBackend.none),
@@ -95,12 +99,14 @@ void main() {
   group('list', () {
     test('S3: returns entries with basename display + full-key ref', () async {
       final http_ = _RecordingClient();
-      http_.nextBody = Uint8List.fromList(utf8.encode(
-        '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
-        '<Contents><Key>backups/a.json</Key></Contents>'
-        '<Contents><Key>backups/b.json</Key></Contents>'
-        '</ListBucketResult>',
-      ));
+      http_.nextBody = Uint8List.fromList(
+        utf8.encode(
+          '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+          '<Contents><Key>backups/a.json</Key></Contents>'
+          '<Contents><Key>backups/b.json</Key></Contents>'
+          '</ListBucketResult>',
+        ),
+      );
       final svc = CloudBackupService(_s3(http_), _webdav(_RecordingClient()));
       final entries = await svc.list(s3Config);
       expect(entries.map((e) => e.name), ['a.json', 'b.json']);
@@ -109,16 +115,18 @@ void main() {
 
     test('WebDAV: returns entries with basename display + href ref', () async {
       final http_ = _RecordingClient();
-      http_.nextBody = Uint8List.fromList(utf8.encode(
-        '<d:multistatus xmlns:d="DAV:">'
-        '<d:response><d:href>/dav/backups/</d:href>'
-        '<d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat>'
-        '</d:response>'
-        '<d:response><d:href>/dav/backups/a.json</d:href>'
-        '<d:propstat><d:prop><d:resourcetype/></d:prop></d:propstat>'
-        '</d:response>'
-        '</d:multistatus>',
-      ));
+      http_.nextBody = Uint8List.fromList(
+        utf8.encode(
+          '<d:multistatus xmlns:d="DAV:">'
+          '<d:response><d:href>/dav/backups/</d:href>'
+          '<d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat>'
+          '</d:response>'
+          '<d:response><d:href>/dav/backups/a.json</d:href>'
+          '<d:propstat><d:prop><d:resourcetype/></d:prop></d:propstat>'
+          '</d:response>'
+          '</d:multistatus>',
+        ),
+      );
       final svc = CloudBackupService(_s3(_RecordingClient()), _webdav(http_));
       final entries = await svc.list(webdavConfig);
       expect(entries.map((e) => e.name), ['a.json']);
@@ -154,10 +162,7 @@ void main() {
       );
       final req = http_.lastRequest!;
       expect(req.method, 'GET');
-      expect(
-        req.url.toString(),
-        'https://dav.example.com/dav/backups/a.json',
-      );
+      expect(req.url.toString(), 'https://dav.example.com/dav/backups/a.json');
       expect(utf8.decode(out), 'payload');
     });
   });

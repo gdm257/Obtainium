@@ -173,6 +173,20 @@ class GitLab extends AppSource {
         throw NoReleasesError();
       }
       final json = decoded;
+      final List<String> rawReleaseTitleCandidates = <String>[];
+      for (final rel in json) {
+        if (rel is Map<String, dynamic>) {
+          final String? title =
+              (rel['name'] as String?)?.trim().isNotEmpty == true
+              ? (rel['name'] as String).trim()
+              : (rel['tag_name'] as String?)?.trim();
+          if (title != null &&
+              title.isNotEmpty &&
+              !rawReleaseTitleCandidates.contains(title)) {
+            rawReleaseTitleCandidates.add(title);
+          }
+        }
+      }
       apkDetailsList = json.map((e) {
         final apkUrlsFromAssets =
             (e['assets']?['links'] as List<dynamic>? ?? [])
@@ -229,11 +243,23 @@ class GitLab extends AppSource {
         final DateTime? releaseDate = releaseDateString != null
             ? DateTime.tryParse(releaseDateString.toString())
             : null;
+        final String? rawChangeLog =
+            (e['description'] ??
+                    e['release']?['description'] ??
+                    e['message'] ??
+                    e['commit']?['message'])
+                ?.toString();
+        final String? changeLog =
+            (rawChangeLog != null && rawChangeLog.trim().isNotEmpty)
+            ? rawChangeLog.trim()
+            : null;
         return APKDetails(
           e['tag_name'] ?? e['name'],
           apkUrls.entries.toList(),
           AppNames(names.author, names.name.split('/').last),
           releaseDate: releaseDate,
+          changeLog: changeLog,
+          rawReleaseTitleCandidates: rawReleaseTitleCandidates,
         );
       });
       if (apkDetailsList.isEmpty) {

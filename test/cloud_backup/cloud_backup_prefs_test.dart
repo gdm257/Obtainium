@@ -4,19 +4,21 @@ import 'package:obtainium/services/cloud_backup/cloud_backup_prefs.dart';
 void main() {
   group('cloudBackupConfigFromPrefs', () {
     test('maps every pref to the matching config field', () {
-      final cfg = cloudBackupConfigFromPrefs((k) => const {
-        'cloudBackupActive': 's3',
-        'cloudBackupS3_endpoint': 'https://s3.example.com',
-        'cloudBackupS3_bucket': 'bkt',
-        'cloudBackupS3_region': 'eu-west-1',
-        'cloudBackupS3_prefix': 'obk/',
-        'cloudBackupS3_accessKeyId': 'AKID',
-        'cloudBackupS3_secretAccessKey-creds': 'SECRET',
-        'cloudBackupWebDav_baseUrl': 'https://dav.example.com/dav/',
-        'cloudBackupWebDav_prefix': 'obk/',
-        'cloudBackupWebDav_username': 'u',
-        'cloudBackupWebDav_password-creds': 'P',
-      }[k]);
+      final cfg = cloudBackupConfigFromPrefs(
+        (k) => const {
+          'cloudBackupActive': 's3',
+          'cloudBackupS3_endpoint': 'https://s3.example.com',
+          'cloudBackupS3_bucket': 'bkt',
+          'cloudBackupS3_region': 'eu-west-1',
+          'cloudBackupS3_prefix': 'obk/',
+          'cloudBackupS3_accessKeyId': 'AKID',
+          'cloudBackupS3_secretAccessKey-creds': 'SECRET',
+          'cloudBackupWebDav_baseUrl': 'https://dav.example.com/dav/',
+          'cloudBackupWebDav_prefix': 'obk/',
+          'cloudBackupWebDav_username': 'u',
+          'cloudBackupWebDav_password-creds': 'P',
+        }[k],
+      );
 
       expect(cfg.active, CloudBackend.s3);
       expect(cfg.s3Endpoint, 'https://s3.example.com');
@@ -72,7 +74,10 @@ void main() {
       expect(written['cloudBackupS3_prefix'], 'obk/');
       expect(written['cloudBackupS3_accessKeyId'], 'AKID');
       expect(written['cloudBackupS3_secretAccessKey-creds'], 'SECRET');
-      expect(written['cloudBackupWebDav_baseUrl'], 'https://dav.example.com/dav/');
+      expect(
+        written['cloudBackupWebDav_baseUrl'],
+        'https://dav.example.com/dav/',
+      );
       expect(written['cloudBackupWebDav_prefix'], 'obk/');
       expect(written['cloudBackupWebDav_username'], 'u');
       expect(written['cloudBackupWebDav_password-creds'], 'P');
@@ -95,10 +100,7 @@ void main() {
 
   test('cloud secret pref keys match the creds-keys contract', () {
     // The loader reads secrets under the exact keys isSecretSettingKey knows.
-    expect(
-      cloudBackupPrefKeyS3Secret,
-      'cloudBackupS3_secretAccessKey-creds',
-    );
+    expect(cloudBackupPrefKeyS3Secret, 'cloudBackupS3_secretAccessKey-creds');
     expect(
       cloudBackupPrefKeyWebDavPassword,
       'cloudBackupWebDav_password-creds',

@@ -99,38 +99,43 @@ void main() {
   });
 
   group('listFiles', () {
-    test('issues PROPFIND with Depth:1 and parses hrefs, skipping collections', () async {
-      http_.nextBody = Uint8List.fromList(utf8.encode(
-        '<?xml version="1.0" encoding="utf-8"?>'
-        '<d:multistatus xmlns:d="DAV:">'
-        '<d:response>'
-        '<d:href>/backups/</d:href>'
-        '<d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>'
-        '<d:status>HTTP/1.1 200 OK</d:status></d:propstat>'
-        '</d:response>'
-        '<d:response>'
-        '<d:href>/backups/a.json</d:href>'
-        '<d:propstat><d:prop><d:resourcetype/></d:prop>'
-        '<d:status>HTTP/1.1 200 OK</d:status></d:propstat>'
-        '</d:response>'
-        '<d:response>'
-        '<d:href>/backups/b.json</d:href>'
-        '<d:propstat><d:prop><d:resourcetype/></d:prop>'
-        '<d:status>HTTP/1.1 200 OK</d:status></d:propstat>'
-        '</d:response>'
-        '</d:multistatus>',
-      ));
-      final hrefs = await webdav.listFiles(
-        collectionUrl: Uri.parse('https://dav.example.com/backups/'),
-        username: username,
-        password: password,
-      );
-      final req = http_.lastRequest!;
-      expect(req.method, 'PROPFIND');
-      expect(req.headers['Depth'], '1');
-      expect(req.headers['Authorization'], expectedBasic);
-      // The collection itself (trailing '/') is dropped.
-      expect(hrefs, ['/backups/a.json', '/backups/b.json']);
-    });
+    test(
+      'issues PROPFIND with Depth:1 and parses hrefs, skipping collections',
+      () async {
+        http_.nextBody = Uint8List.fromList(
+          utf8.encode(
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<d:multistatus xmlns:d="DAV:">'
+            '<d:response>'
+            '<d:href>/backups/</d:href>'
+            '<d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>'
+            '<d:status>HTTP/1.1 200 OK</d:status></d:propstat>'
+            '</d:response>'
+            '<d:response>'
+            '<d:href>/backups/a.json</d:href>'
+            '<d:propstat><d:prop><d:resourcetype/></d:prop>'
+            '<d:status>HTTP/1.1 200 OK</d:status></d:propstat>'
+            '</d:response>'
+            '<d:response>'
+            '<d:href>/backups/b.json</d:href>'
+            '<d:propstat><d:prop><d:resourcetype/></d:prop>'
+            '<d:status>HTTP/1.1 200 OK</d:status></d:propstat>'
+            '</d:response>'
+            '</d:multistatus>',
+          ),
+        );
+        final hrefs = await webdav.listFiles(
+          collectionUrl: Uri.parse('https://dav.example.com/backups/'),
+          username: username,
+          password: password,
+        );
+        final req = http_.lastRequest!;
+        expect(req.method, 'PROPFIND');
+        expect(req.headers['Depth'], '1');
+        expect(req.headers['Authorization'], expectedBasic);
+        // The collection itself (trailing '/') is dropped.
+        expect(hrefs, ['/backups/a.json', '/backups/b.json']);
+      },
+    );
   });
 }

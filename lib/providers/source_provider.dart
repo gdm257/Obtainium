@@ -45,6 +45,14 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/app_sources/githubstars.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
+import 'package:obtainium/version/version_detection_mode.dart';
+import 'package:obtainium/version/version_strings.dart';
+
+// Version semantics live in lib/version/ and are re-exported here so the ~40
+// files that already import source_provider.dart (for [App]) keep seeing the
+// whole version API from one place.
+export 'package:obtainium/version/version_detection_mode.dart';
+export 'package:obtainium/version/version_strings.dart';
 
 class AppNames {
   String author;
@@ -455,6 +463,27 @@ class App {
   /// Type-safe accessor for [additionalSettings].
   TypedSettings get settings => TypedSettings(additionalSettings);
 
+  /// This app's parsed version-detection mode.
+  VersionDetectionMode get versionDetectionMode =>
+      VersionDetectionMode.fromStored(additionalSettings['versionDetection']);
+
+  /// Whether the stored versions are meant to be comparable with the device's —
+  /// i.e. every mode except [VersionDetectionMode.pseudo].
+  bool get usesStandardVersionDetection =>
+      versionDetectionMode != VersionDetectionMode.pseudo;
+
+  /// Whether the device's `versionCode` (not `versionName`) is this app's real
+  /// installed version.
+  ///
+  /// `useVersionCodeAsOSVersion` is a derived boolean kept in sync with the
+  /// [VersionDetectionMode.versionCode] dropdown option, so either one being set
+  /// means the same thing. Reading only the boolean (as install-status
+  /// reconciliation used to) compares `versionName` against a stored version
+  /// code whenever the two fall out of sync.
+  bool get usesVersionCodeAsOsVersion =>
+      versionDetectionMode == VersionDetectionMode.versionCode ||
+      settings.getBool('useVersionCodeAsOSVersion');
+
   App copyWith({
     String? id,
     String? url,
@@ -839,7 +868,7 @@ abstract class AppSource {
 
   String standardizeUrl(String url) {
     url = preStandardizeUrl(url);
-    if (!hostChanged) {
+    if (!hostChanged || hostIdenticalDespiteAnyChange) {
       url = sourceSpecificStandardizeURL(url);
     }
     return url;
@@ -1250,13 +1279,25 @@ abstract class AppSource {
 
     if (versionDetectionDisallowed) {
       for (final item in agnosticItems.expand((row) => row)) {
-        // versionDetection is now a dropdown; guard the cast so this can't crash
-        // (mirrors fork main, which only disables switch-typed items here).
-        if ((item.key == 'versionDetection' ||
-                item.key == 'useVersionCodeAsOSVersion') &&
-            item is GeneratedFormSwitch) {
+        if (item.key != 'versionDetection' &&
+            item.key != 'useVersionCodeAsOSVersion') {
+          continue;
+        }
+        if (item is GeneratedFormSwitch) {
           item.disabled = true;
           item.value = false;
+        } else if (item is GeneratedFormDropdown) {
+          // versionDetection is a dropdown now. Pinning it to the only mode this
+          // source supports is what actually enforces the flag: the previous
+          // switch-only guard silently did nothing, leaving every mode selectable
+          // on sources that cannot compare versions at all (and 'versionCode' /
+          // explicit 'standard' are excluded from install-status auto-disable, so
+          // nothing corrected the choice afterwards).
+          item.disabledOptKeys = VersionDetectionMode.values
+              .where((mode) => mode != VersionDetectionMode.pseudo)
+              .map((mode) => mode.key)
+              .toList();
+          item.value = VersionDetectionMode.pseudo.key;
         }
       }
     }
@@ -1436,11 +1477,7 @@ List<MapEntry<String, String>> filterApks(
 /// Returns true when the app uses pseudo-versioning (track-only or disabled version detection).
 bool isVersionPseudo(App app) =>
     app.settings.getBool('trackOnly') ||
-    (app.installedVersion != null &&
-        // versionDetection is a string enum, NOT a bool — getBool() would return
-        // false for 'auto'/'standard'/'versionCode' and mark every app pseudo.
-        (app.additionalSettings['versionDetection'] == 'pseudo' ||
-            app.additionalSettings['versionDetection'] == false));
+    (app.installedVersion != null && !app.usesStandardVersionDetection);
 
 class SourceProvider {
   static final SourceProvider _instance = SourceProvider._();
@@ -1717,6 +1754,19 @@ class SourceProvider {
       // microsecondsSinceEpoch renders as an opaque integer and, on upgrade,
       // recomputes to a different value → a one-time spurious "update".
       apk.version = apk.releaseDate!.toUtc().toIso8601String();
+    }
+    // In version-code mode the app's installed version is the device's
+    // versionCode, so the stored latest version has to be a version code too.
+    // Comparing a code against a dotted version string cannot be ordered (a
+    // versionCode of 123 reads as "newer" than 1.2.4), so prefer the source's own
+    // version code whenever it publishes one. Only the default version string is
+    // overridden — an explicit versionStringSource choice still wins.
+    if (versionDetectionModeOf(additionalSettings) ==
+            VersionDetectionMode.versionCode &&
+        apk.versionCode != null &&
+        getVersionStringSource(additionalSettings) ==
+            versionStringSourceDefault) {
+      apk.version = apk.versionCode!.toString();
     }
     apk.apkUrls = filterApks(
       apk.apkUrls,
@@ -2049,163 +2099,6 @@ class HttpService {
   }
 }
 
-class VersionService {
-  static const defaultMatchGroup = '0';
-
-  static final List<String> standardVersionRegExStrings =
-      _generateStandardVersionRegExStrings();
-
-  static final List<MapEntry<String, RegExp>> strictStandardVersionRegExes =
-      standardVersionRegExStrings
-          .map((p) => MapEntry(p, RegExp('^$p\$')))
-          .toList();
-
-  static final List<MapEntry<String, RegExp>> looseStandardVersionRegExes =
-      standardVersionRegExStrings.map((p) => MapEntry(p, RegExp(p))).toList();
-
-  static List<String> _generateStandardVersionRegExStrings() {
-    final basics = [
-      '[0-9]+',
-      '[0-9]+\\.[0-9]+',
-      '[0-9]+\\.[0-9]+\\.[0-9]+',
-      '[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+',
-    ];
-    final preSuffixes = ['-', '\\+'];
-    final suffixes = [
-      'alpha',
-      'beta',
-      'rc',
-      'pre',
-      'dev',
-      'snapshot',
-      'nightly',
-      'ose',
-      '[0-9]+',
-    ];
-    final finals = ['\\+[0-9]+', '[0-9]+'];
-    final List<String> results = [];
-    for (var b in basics) {
-      results.add(b);
-      for (var p in preSuffixes) {
-        for (var s in suffixes) {
-          results.add('$b$s');
-          results.add('$b$p$s');
-          for (var f in finals) {
-            results.add('$b$s$f');
-            results.add('$b$p$s$f');
-          }
-        }
-      }
-    }
-    return results.toSet().toList();
-  }
-
-  String? regExValidator(String? value) {
-    if (value == null || value.isEmpty) {
-      return null;
-    }
-    try {
-      RegExp(value);
-    } catch (e) {
-      return tr('invalidRegEx');
-    }
-    return null;
-  }
-
-  /// Replaces `$N` references in a string with the corresponding regex match groups.
-  String? replaceMatchGroupsInString(
-    RegExpMatch match,
-    String matchGroupString,
-  ) {
-    if (RegExp('^\\d+\$').hasMatch(matchGroupString)) {
-      matchGroupString = '\$$matchGroupString';
-    }
-    final numberRegex = RegExp(r'\$\d+');
-    final numbers = numberRegex.allMatches(matchGroupString);
-    if (numbers.isEmpty) {
-      return null;
-    }
-    var outputString = matchGroupString;
-    for (final numberMatch in numbers) {
-      final number = numberMatch.group(0)!;
-      final int matchGroupIndex = int.parse(number.substring(1));
-      // Guard against a replacement referencing a capture group that doesn't
-      // exist — return null (→ caller raises NoVersionError) instead of letting
-      // match.group() throw a RangeError (parity with fork main).
-      if (matchGroupIndex > match.groupCount) {
-        return null;
-      }
-      final matchGroup = match.group(matchGroupIndex) ?? '';
-      final isEscaped = outputString.contains('\\$number');
-      if (!isEscaped) {
-        outputString = outputString.replaceAll(number, matchGroup);
-      } else {
-        outputString = outputString.replaceAll('\\$number', number);
-      }
-    }
-    return outputString;
-  }
-
-  /// Applies a version extraction regex to a string and returns the captured match group.
-  String? extractVersion(
-    String? versionExtractionRegEx,
-    String? matchGroupString,
-    String stringToCheck,
-  ) {
-    if (versionExtractionRegEx?.isNotEmpty == true) {
-      String? version = stringToCheck;
-      final match = RegExp(versionExtractionRegEx!).allMatches(version);
-      if (match.isEmpty) {
-        throw NoVersionError();
-      }
-      matchGroupString = matchGroupString?.trim() ?? '';
-      if (matchGroupString.isEmpty) {
-        matchGroupString = defaultMatchGroup;
-      }
-      version = replaceMatchGroupsInString(match.last, matchGroupString);
-      if (version?.isNotEmpty != true) {
-        throw NoVersionError();
-      }
-      return version!;
-    } else {
-      return null;
-    }
-  }
-
-  static final Map<String, Set<String>> _strictFormatCache = {};
-  static final Map<String, Set<String>> _looseFormatCache = {};
-  static const int _maxFormatCacheSize = 4096;
-
-  Set<String> findStandardFormatsForVersion(String version, bool strict) {
-    final cache = strict ? _strictFormatCache : _looseFormatCache;
-    final cached = cache[version];
-    if (cached != null) return cached;
-
-    final Set<String> results = {};
-    final patterns = strict
-        ? strictStandardVersionRegExes
-        : looseStandardVersionRegExes;
-    for (var entry in patterns) {
-      if (entry.value.hasMatch(version)) {
-        results.add(entry.key);
-      }
-    }
-    if (cache.length >= _maxFormatCacheSize) cache.clear();
-    cache[version] = results;
-    return results;
-  }
-
-  bool doStringsMatchUnderRegEx(String pattern, String value1, String value2) {
-    final r = RegExp(pattern);
-    final m1 = r.firstMatch(value1);
-    final m2 = r.firstMatch(value2);
-    return m1 != null && m2 != null
-        ? value1.substring(m1.start, m1.end) ==
-              value2.substring(m2.start, m2.end)
-        : false;
-  }
-}
-
 class ApkFilterService {
   static const List<String> apkContainerExtensions = [
     '.apk',
@@ -2250,7 +2143,8 @@ class ApkFilterService {
     if (apkFilterRegEx?.isNotEmpty == true) {
       final reg = RegExp(apkFilterRegEx!);
       apkUrls = apkUrls.where((element) {
-        final hasMatch = reg.hasMatch(element.key);
+        final hasMatch =
+            reg.hasMatch(element.key) || reg.hasMatch(element.value);
         return invert == true ? !hasMatch : hasMatch;
       }).toList();
     }
@@ -2264,12 +2158,15 @@ class ApkFilterService {
   }) async {
     if (apkUrls.length > 1) {
       for (var abi in abis) {
+        final RegExp architecturePattern = RegExp(
+          '.*$abi.*',
+          caseSensitive: false,
+        );
         final urls2 = apkUrls
             .where(
-              (element) => RegExp(
-                '.*$abi.*',
-                caseSensitive: false,
-              ).hasMatch(element.key),
+              (element) =>
+                  architecturePattern.hasMatch(element.key) ||
+                  architecturePattern.hasMatch(element.value),
             )
             .toList();
         if (urls2.isNotEmpty && urls2.length < apkUrls.length) {
@@ -2343,31 +2240,21 @@ void _migrateVersionDetectionFormat(Map<String, dynamic> additionalSettings) {
     additionalSettings.remove('noVersionDetection');
     additionalSettings.remove('releaseDateAsVersion');
   }
-  // Old dropdown/boolean values → the three-state string enum that every reader
-  // now expects ('auto'/'standard'/'pseudo'/'versionCode'). This MUST land on a
-  // string, never a bool — a bool value makes every installed app read as
-  // pseudo-versioned (see isVersionPseudo) and breaks update detection.
-  if (additionalSettings['versionDetection'] == 'standardVersionDetection') {
-    additionalSettings['versionDetection'] = 'auto';
-  } else if (additionalSettings['versionDetection'] == 'noVersionDetection') {
-    additionalSettings['versionDetection'] = 'pseudo';
-  } else if (additionalSettings['versionDetection'] == 'releaseDateAsVersion') {
-    additionalSettings['versionDetection'] = 'pseudo';
+  // 'releaseDateAsVersion' additionally carries a version-string choice, which
+  // [VersionDetectionMode.fromStored] (a pure mode parse) can't express — apply
+  // that side effect before normalising.
+  if (additionalSettings['versionDetection'] == 'releaseDateAsVersion') {
     additionalSettings['releaseDateAsVersion'] = true;
-  } else if (additionalSettings['versionDetection'] == true) {
-    additionalSettings['versionDetection'] = 'auto';
-  } else if (additionalSettings['versionDetection'] == false) {
-    additionalSettings['versionDetection'] = 'pseudo';
   }
-  // 'versionCode' is a dropdown option; keep the derived useVersionCodeAsOSVersion
-  // bool in sync (mirrors fork main).
-  if (additionalSettings['versionDetection'] == 'versionCode' ||
-      additionalSettings['useVersionCodeAsOSVersion'] == true) {
-    additionalSettings['versionDetection'] = 'versionCode';
-    additionalSettings['useVersionCodeAsOSVersion'] = true;
-  } else {
-    additionalSettings['useVersionCodeAsOSVersion'] = false;
-  }
+  // Every other legacy encoding (bools, the pre-dropdown strings) is handled by
+  // [VersionDetectionMode.fromStored]; this rewrites the stored value to the
+  // canonical mode key and re-derives useVersionCodeAsOSVersion. It MUST land on
+  // a string, never a bool — a bool makes every installed app read as
+  // pseudo-versioned (see isVersionPseudo) and breaks update detection.
+  normalizeVersionDetectionSettings(
+    additionalSettings,
+    promoteLegacyBoolean: true,
+  );
 }
 
 /// Converts legacy `supportFixedAPKURL` bool to `defaultPseudoVersioningMethod`.
@@ -2392,6 +2279,22 @@ void _coerceAdditionalSettingTypes(
       additionalSettings[item.key] = item.ensureType(
         additionalSettings[item.key],
       );
+    }
+  }
+}
+
+/// Resolves legacy saved forms where switches that now turn each other off
+/// were both enabled. Form order determines priority.
+void _normalizeMutuallyExclusiveSwitches(
+  Map<String, dynamic> additionalSettings,
+  List<GeneratedFormItem> formItems,
+) {
+  for (final GeneratedFormItem item in formItems) {
+    if (item is! GeneratedFormSwitch || additionalSettings[item.key] != true) {
+      continue;
+    }
+    for (final String targetKey in item.turnsOffKeys) {
+      additionalSettings[targetKey] = false;
     }
   }
 }
@@ -2575,6 +2478,7 @@ Map<String, dynamic> appJSONCompatibilityModifiers(Map<String, dynamic> json) {
     additionalSettings,
   );
   _coerceAdditionalSettingTypes(additionalSettings, formItems);
+  _normalizeMutuallyExclusiveSwitches(additionalSettings, formItems);
 
   int preferredApkIndex = json['preferredApkIndex'] == null
       ? 0

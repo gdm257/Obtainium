@@ -742,6 +742,17 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private var cachedLaunchIntent: Intent? = null
+    private fun getCachedLaunchIntent(): Intent {
+        val existing = cachedLaunchIntent
+        if (existing != null) return existing
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+            ?: Intent(this, MainActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        cachedLaunchIntent = intent
+        return intent
+    }
+
     private fun showDownloadProgressNotification(call: io.flutter.plugin.common.MethodCall): Boolean {
         val id = call.argument<Int>("id") ?: return false
         val title = call.argument<String>("title") ?: return false
@@ -751,13 +762,10 @@ class MainActivity : FlutterActivity() {
         val indeterminate = call.argument<Boolean>("indeterminate") ?: false
         val shortCriticalText = call.argument<String>("shortCriticalText")
 
-        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-            ?: Intent(this, MainActivity::class.java)
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val contentIntent = PendingIntent.getActivity(
             this,
             id,
-            launchIntent,
+            getCachedLaunchIntent(),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             activityLaunchOptions(),
         )

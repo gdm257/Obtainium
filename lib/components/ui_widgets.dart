@@ -16,6 +16,68 @@ Future<void> copyToClipboard(BuildContext context, String text) async {
   }
 }
 
+/// A Material switch that supplies the platform tap feedback omitted by
+/// Flutter's stock [Switch]. On Android this respects the system's touch-sound
+/// setting and plays the same click as buttons and tappable list rows.
+class AppSwitch extends StatelessWidget {
+  const AppSwitch({super.key, required this.value, required this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Switch(
+      value: value,
+      onChanged: onChanged == null
+          ? null
+          : (bool newValue) {
+              unawaited(Feedback.forTap(context));
+              onChanged!(newValue);
+            },
+    );
+  }
+}
+
+/// A [SwitchListTile] with exactly one platform click whether the user taps
+/// the row or the switch itself. The stock tile only supplies feedback for its
+/// row gesture because [Switch] does not call [Feedback.forTap].
+class AppSwitchListTile extends StatelessWidget {
+  const AppSwitchListTile({
+    super.key,
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.contentPadding,
+    this.visualDensity,
+  });
+
+  final Widget title;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final EdgeInsetsGeometry? contentPadding;
+  final VisualDensity? visualDensity;
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      title: title,
+      value: value,
+      onChanged: onChanged == null
+          ? null
+          : (bool newValue) {
+              unawaited(Feedback.forTap(context));
+              onChanged!(newValue);
+            },
+      contentPadding: contentPadding,
+      visualDensity: visualDensity,
+      // The wrapper callback supplies feedback for both activation paths.
+      // Leaving ListTile feedback enabled would double-play on row taps.
+      enableFeedback: false,
+    );
+  }
+}
+
 Future<bool> showConfirmDialog(
   BuildContext context, {
   required String title,

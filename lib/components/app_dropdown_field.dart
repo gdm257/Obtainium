@@ -46,6 +46,7 @@ Widget appDropdownField<T>({
   double borderRadius = 12,
   double? menuWidth,
   bool isDense = true,
+  bool updateInternalValueOnChange = true,
   InputDecoration? decoration,
 }) {
   final ThemeData theme = Theme.of(context);
@@ -84,7 +85,9 @@ Widget appDropdownField<T>({
               items: items,
               onChanged: enabled
                   ? (T? newValue) {
-                      fieldState.didChange(newValue);
+                      if (updateInternalValueOnChange) {
+                        fieldState.didChange(newValue);
+                      }
                       onChanged(newValue);
                     }
                   : null,

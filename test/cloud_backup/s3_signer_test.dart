@@ -138,7 +138,11 @@ void main() {
   test('Authorization header builds AWS4 form with all fields', () {
     final auth = authorizationHeader(
       accessKey: 'AKIDEXAMPLE',
-      scope: scope(dateStamp: '20150830', region: 'us-east-1', service: 'service'),
+      scope: scope(
+        dateStamp: '20150830',
+        region: 'us-east-1',
+        service: 'service',
+      ),
       signedHeaders: 'host;x-amz-date',
       signatureHex: 'deadbeef',
     );

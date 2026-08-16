@@ -116,7 +116,9 @@ class CloudBackupService {
           accessKey: cfg.s3AccessKey,
           secretKey: cfg.s3SecretKey,
         );
-        return keys.map((k) => CloudBackupEntry(name: _basename(k), ref: k)).toList();
+        return keys
+            .map((k) => CloudBackupEntry(name: _basename(k), ref: k))
+            .toList();
       case CloudBackend.webdav:
         _requireWebDav(cfg);
         final hrefs = await webdav.listFiles(
@@ -124,14 +126,19 @@ class CloudBackupService {
           username: cfg.webdavUsername,
           password: cfg.webdavPassword,
         );
-        return hrefs.map((h) => CloudBackupEntry(name: _basename(h), ref: h)).toList();
+        return hrefs
+            .map((h) => CloudBackupEntry(name: _basename(h), ref: h))
+            .toList();
       case CloudBackend.none:
         throw CloudBackupConfigException('No cloud backup backend is active.');
     }
   }
 
   /// Downloads the file described by [entry] from the active backend.
-  Future<Uint8List> download(CloudBackupConfig cfg, CloudBackupEntry entry) async {
+  Future<Uint8List> download(
+    CloudBackupConfig cfg,
+    CloudBackupEntry entry,
+  ) async {
     switch (cfg.active) {
       case CloudBackend.s3:
         _requireS3(cfg);
@@ -167,7 +174,9 @@ class CloudBackupService {
 
   void _requireWebDav(CloudBackupConfig cfg) {
     if (cfg.webdavBaseUrl.isEmpty) {
-      throw CloudBackupConfigException('WebDAV backend is not fully configured.');
+      throw CloudBackupConfigException(
+        'WebDAV backend is not fully configured.',
+      );
     }
   }
 

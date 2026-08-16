@@ -295,7 +295,7 @@ class DownloadNotification extends ObtainiumNotification {
          'APP_DOWNLOADING',
          tr('downloadingXNotifChannel', args: [tr('app')]),
          tr('downloadNotifDescription'),
-         Importance.low,
+         Importance.min,
          onlyAlertOnce: true,
          progPercent: progPercent,
          androidActions: appId != null

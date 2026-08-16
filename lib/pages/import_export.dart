@@ -5,6 +5,7 @@ import 'package:easy_localization/easy_localization.dart' hide TextDirection;
 import 'package:expressive_loading_indicator/expressive_loading_indicator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:obtainium/layout_breakpoints.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
 import 'package:obtainium/components/backup_import_sheet.dart';
 import 'package:obtainium/components/cloud_backup_config_dialog.dart';
@@ -14,6 +15,7 @@ import 'package:obtainium/components/app_dropdown_field.dart';
 import 'package:obtainium/components/custom_app_bar.dart';
 import 'package:obtainium/components/generated_form_renderer.dart';
 import 'package:obtainium/components/rippling_wavy_progress/linear.dart';
+import 'package:obtainium/components/ui_widgets.dart' show AppSwitchListTile;
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
@@ -76,9 +78,13 @@ class _ImportExportPageState extends State<ImportExportPage> {
         s.saveDownloadedApkCopies,
         s.exportSettings,
         s.autoExportOnChanges,
+        s.alwaysUsePhoneLayout,
       ),
     );
     final settingsProvider = context.read<SettingsProvider>();
+    final bool isLargeScreen =
+        MediaQuery.sizeOf(context).width >= kLargeScreenWidthBreakpoint &&
+        !settingsProvider.alwaysUsePhoneLayout;
 
     final outlineButtonStyle = ButtonStyle(
       foregroundColor: WidgetStateProperty.all(
@@ -327,6 +333,7 @@ class _ImportExportPageState extends State<ImportExportPage> {
         }
       }
     }
+
     final ColorScheme impScheme = Theme.of(context).colorScheme;
 
     /// Folder picker rows with a title + subtitle (more vertical air).
@@ -451,7 +458,8 @@ class _ImportExportPageState extends State<ImportExportPage> {
                   16,
                   8,
                   16,
-                  8 + MediaQuery.paddingOf(context).bottom,
+                  MediaQuery.paddingOf(context).bottom +
+                      (isLargeScreen ? 24.0 : 88.0),
                 ),
                 sliver: SliverToBoxAdapter(
                   child: Column(
@@ -468,7 +476,11 @@ class _ImportExportPageState extends State<ImportExportPage> {
                             settingsProvider.getApkSaveDir(
                               requireAccess: false,
                             ),
-                            settingsProvider.getApkSaveDir(),
+                            settingsProvider.saveDownloadedApkCopies
+                                ? settingsProvider.getApkSaveDir()
+                                : settingsProvider.getApkSaveDir(
+                                    requireAccess: false,
+                                  ),
                           ]),
                           builder: (context, apkSaveSnapshot) {
                             final Uri? savedApkSaveUri =
@@ -559,7 +571,7 @@ class _ImportExportPageState extends State<ImportExportPage> {
                                   ),
                                 ),
                               ),
-                              SwitchListTile(
+                              AppSwitchListTile(
                                 visualDensity: VisualDensity.compact,
                                 contentPadding: importPageCardSwitchTilePadding,
                                 title: Text(tr('saveDownloadedApkCopies')),
@@ -583,7 +595,11 @@ class _ImportExportPageState extends State<ImportExportPage> {
                       FutureBuilder<List<Uri?>>(
                         future: Future.wait<Uri?>([
                           settingsProvider.getExportDir(requireAccess: false),
-                          settingsProvider.getExportDir(),
+                          settingsProvider.autoExportOnChanges
+                              ? settingsProvider.getExportDir()
+                              : settingsProvider.getExportDir(
+                                  requireAccess: false,
+                                ),
                         ]),
                         builder: (context, exportSnapshot) {
                           final Uri? savedExportUri = exportSnapshot.data?[0];
@@ -731,7 +747,7 @@ class _ImportExportPageState extends State<ImportExportPage> {
                                 );
                               })(),
                             ),
-                            SwitchListTile(
+                            AppSwitchListTile(
                               visualDensity: VisualDensity.compact,
                               contentPadding: importPageCardSwitchTilePadding,
                               title: Text(tr('autoExportOnChanges')),

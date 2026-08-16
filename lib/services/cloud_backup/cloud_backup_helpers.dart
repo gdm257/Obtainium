@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 /// Pure helpers for the cloud-backup feature — no I/O, no Flutter/i18n deps.
 ///
 /// Kept separate from the settings/http-backed facade so the logic that has to
@@ -43,14 +44,14 @@ Map<String, dynamic> filterCloudCredsForImport(
   for (final key in cloudBackupCredsKeys) {
     if (!out.containsKey(key)) continue;
     final deviceVal = deviceSettings[key];
-    final deviceHas =
-        deviceVal != null && deviceVal.toString().isNotEmpty;
+    final deviceHas = deviceVal != null && deviceVal.toString().isNotEmpty;
     if (deviceHas) {
       out.remove(key);
     }
   }
   return out;
 }
+
 /// Applies the cloud-creds import rule to a backup JSON string: for each cloud
 /// secret in the backup's `settings` block, drop it when the device already has
 /// a non-empty value (so the existing import path leaves the device value

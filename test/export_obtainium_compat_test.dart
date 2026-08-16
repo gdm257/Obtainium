@@ -176,6 +176,39 @@ void main() {
     expect(merged?['installMethod'], InstallerMode.shizuku.name);
   });
 
+  test('imported dhizuku installMethod survives the merge unchanged', () {
+    final Map<String, dynamic>? merged = mergeImportedSettingsMaps(
+      <String, dynamic>{'installMethod': InstallerMode.dhizuku.name},
+      null,
+    );
+
+    expect(merged?['installMethod'], InstallerMode.dhizuku.name);
+  });
+
+  test(
+    'dhizuku installMethod sanitizes to shizuku for Obtainium export and round-trips via overlay',
+    () {
+      final SplitExportSettings split = splitSettingsForExport(
+        <String, dynamic>{'installMethod': InstallerMode.dhizuku.name},
+      );
+
+      // Shared block is Obtainium-compatible ('shizuku')
+      expect(split.settings['installMethod'], InstallerMode.shizuku.name);
+      // ObtainX overlay retains 'dhizuku'
+      expect(
+        split.settingsObtainX?['installMethod'],
+        InstallerMode.dhizuku.name,
+      );
+
+      final Map<String, dynamic>? merged = mergeImportedSettingsMaps(
+        split.settings,
+        split.settingsObtainX,
+      );
+      // ObtainX import restores 'dhizuku'
+      expect(merged?['installMethod'], InstallerMode.dhizuku.name);
+    },
+  );
+
   test(
     'ObtainX self-import round-trips groupBy=appType via the shared block',
     () {

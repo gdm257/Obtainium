@@ -19,6 +19,7 @@ import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
+import 'package:obtainium/widgets/app_toast.dart';
 import 'package:provider/provider.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -857,20 +858,21 @@ class _ObtainiumState extends State<Obtainium> with WidgetsBindingObserver {
             scaffoldMessengerKey: scaffoldMessengerKey,
             debugShowCheckedModeBanner: false,
             themeAnimationDuration: Duration.zero,
-            // Cap the system scaler globally before applying the in-app UI
-            // scale. The default preserves Flutter's non-linear curve; a
-            // custom app scale uses a bounded linear approximation.
+            // Scale the complete app viewport while independently capping the
+            // system text scaler. This keeps text, controls, icons, spacing,
+            // overlays, and touch targets at the same user-selected scale.
+            //
+            // Nothing else belongs in this builder. It used to also install
+            // FToastBuilder's app-wide Overlay around this MediaQuery, and an
+            // Overlay consumes [Overlay.initialEntries] exactly once in
+            // initState — so the entry kept serving the child instance it was
+            // first handed and every later rebuild of this builder was dropped.
+            // That froze MediaQuery at the launch size and pinned the
+            // phone/tablet layout to whichever one the app started in. The
+            // toast host now lives under [home] instead; see [AppToastHost].
             builder: (BuildContext context, Widget? child) {
-              final MediaQueryData mq = MediaQuery.of(context);
-              return MediaQuery(
-                data: mq.copyWith(
-                  textScaler: cappedAppTextScaler(
-                    systemTextScaler: mq.textScaler,
-                    userScale: settingsProvider.appUiScale,
-                    minimumEffectiveScale: SettingsProvider.appUiScaleMin,
-                    maximumEffectiveScale: SettingsProvider.appUiScaleMax,
-                  ),
-                ),
+              return AppUiScaler(
+                scale: settingsProvider.appUiScale,
                 child: child ?? const SizedBox.shrink(),
               );
             },
@@ -880,12 +882,19 @@ class _ObtainiumState extends State<Obtainium> with WidgetsBindingObserver {
             // nav/switch/segmented/tooltip themes.
             theme: lightTheme,
             darkTheme: darkTheme,
-            home: Shortcuts(
-              shortcuts: <LogicalKeySet, Intent>{
-                LogicalKeySet(LogicalKeyboardKey.select):
-                    const ActivateIntent(),
-              },
-              child: HomePage(key: homePageKey),
+            // The toast host sits here, inside the route, rather than in
+            // [builder]: it only needs a context whose ancestor is an Overlay
+            // (FToast looks one up), and the root navigator already provides
+            // one. Wrapping the app in a second, app-wide Overlay from the
+            // builder is what used to freeze MediaQuery — see the note there.
+            home: AppToastHost(
+              child: Shortcuts(
+                shortcuts: <LogicalKeySet, Intent>{
+                  LogicalKeySet(LogicalKeyboardKey.select):
+                      const ActivateIntent(),
+                },
+                child: HomePage(key: homePageKey),
+              ),
             ),
           );
         },

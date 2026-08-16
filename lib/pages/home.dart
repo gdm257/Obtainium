@@ -33,6 +33,30 @@ class NavigationPageItem {
   NavigationPageItem(this.title, this.icon, this.widget);
 }
 
+/// Keeps the system navigation-bar padding stable while Android animates the
+/// keyboard. Flutter's normal [MediaQueryData.padding] shrinks as
+/// [MediaQueryData.viewInsets] grows, even when every Scaffold opts out of IME
+/// resizing. Pages that position bottom content from `padding.bottom` would
+/// therefore still rebuild and relayout on every keyboard frame.
+class _StableBottomPaddingMediaQuery extends StatelessWidget {
+  const _StableBottomPaddingMediaQuery({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final MediaQueryData mediaQuery = MediaQuery.of(context);
+    return MediaQuery(
+      data: mediaQuery.copyWith(
+        padding: mediaQuery.padding.copyWith(
+          bottom: mediaQuery.viewPadding.bottom,
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
 class _DirectionalIndexedStack extends StatefulWidget {
   const _DirectionalIndexedStack({
     super.key,
@@ -451,8 +475,15 @@ class HomePageState extends State<HomePage> {
     required ColorScheme scheme,
     required BuildContext context,
   }) {
-    final bool keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
-    final double bottomInset = MediaQuery.of(context).padding.bottom;
+    final bool keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    if (keyboardOpen) {
+      // Remove the blurred navigation surface immediately. Animating its
+      // BackdropFilter while Android animates the IME makes every keyboard
+      // frame compete with a second full-width compositing animation, which
+      // produces the staged keyboard motion on every page containing a field.
+      return const SizedBox.shrink();
+    }
+    final double bottomInset = MediaQuery.paddingOf(context).bottom;
 
     bool isAddAppSubFlowActive = false;
     if (selectedIndex == 1) {
@@ -558,8 +589,8 @@ class HomePageState extends State<HomePage> {
               : scheme.onSurfaceVariant,
         );
 
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
+        return InkWell(
+          borderRadius: BorderRadius.circular(22),
           onTap: () async {
             hapticSelection();
             unawaited(switchToPage(index));
@@ -660,9 +691,7 @@ class HomePageState extends State<HomePage> {
     return AnimatedSlide(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOutCubicEmphasized,
-      offset: (keyboardOpen || isAddAppSubFlowActive)
-          ? const Offset(0, 1.5)
-          : Offset.zero,
+      offset: isAddAppSubFlowActive ? const Offset(0, 1.5) : Offset.zero,
       child: Padding(
         padding: EdgeInsets.only(
           left: 12.0,
@@ -871,11 +900,9 @@ class HomePageState extends State<HomePage> {
 
           return Scaffold(
             // Don't resize the shell for the keyboard. A resize relays-out and
-            // lifts the bottom nav bar every frame of the keyboard animation,
-            // and the nav bar's progressive blur (a BackdropFilter) re-rasterizes
-            // on each of those frames — that is the staggered nav-bar slide and
-            // the keyboard-slide stutter. With this off the nav bar stays put and
-            // the keyboard simply overlays it, so the blur is never re-rastered.
+            // repaints every mounted tab on each IME animation frame. The
+            // floating blurred navigation surface is removed immediately while
+            // the keyboard is open, and the keyboard overlays page content.
             // Note this also stops the shell consuming the bottom inset, so it
             // reaches the nested Apps/Add-App Scaffolds — they are deliberately
             // resizeToAvoidBottomInset:false too, because extendBody draws their
@@ -923,11 +950,13 @@ class HomePageState extends State<HomePage> {
                               context: context,
                               removeLeft: true,
                               removeRight: true,
-                              child: _DirectionalIndexedStack(
-                                key: _pageStackKey,
-                                index: homeNavSelectedIndex,
-                                axis: pageTransitionAxis,
-                                children: pages.map((p) => p.widget).toList(),
+                              child: _StableBottomPaddingMediaQuery(
+                                child: _DirectionalIndexedStack(
+                                  key: _pageStackKey,
+                                  index: homeNavSelectedIndex,
+                                  axis: pageTransitionAxis,
+                                  children: pages.map((p) => p.widget).toList(),
+                                ),
                               ),
                             ),
                           ),
@@ -940,11 +969,13 @@ class HomePageState extends State<HomePage> {
                     children: [
                       // Keep all four pages mounted while sliding only the
                       // active page pair during tab changes.
-                      _DirectionalIndexedStack(
-                        key: _pageStackKey,
-                        index: homeNavSelectedIndex,
-                        axis: pageTransitionAxis,
-                        children: pages.map((p) => p.widget).toList(),
+                      _StableBottomPaddingMediaQuery(
+                        child: _DirectionalIndexedStack(
+                          key: _pageStackKey,
+                          index: homeNavSelectedIndex,
+                          axis: pageTransitionAxis,
+                          children: pages.map((p) => p.widget).toList(),
+                        ),
                       ),
                       _floatingHomeNavigationBar(
                         pages: pages,

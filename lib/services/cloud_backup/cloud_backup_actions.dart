@@ -26,11 +26,12 @@ class CloudBackupActions {
     this.settings, {
     http.Client? httpClient,
     CloudBackupService? service,
-  })  : _service = service ??
-            CloudBackupService(
-              S3Client(httpClient ?? http.Client()),
-              WebDavClient(httpClient ?? http.Client()),
-            );
+  }) : _service =
+           service ??
+           CloudBackupService(
+             S3Client(httpClient ?? http.Client()),
+             WebDavClient(httpClient ?? http.Client()),
+           );
 
   final AppsProvider apps;
   final SettingsProvider settings;
@@ -49,8 +50,7 @@ class CloudBackupActions {
     final cfg = config;
     final exportMap = apps.generateExportJSON(sp: settings);
     const encoder = JsonEncoder.withIndent('    ');
-    final bytes =
-        Uint8List.fromList(utf8.encode(encoder.convert(exportMap)));
+    final bytes = Uint8List.fromList(utf8.encode(encoder.convert(exportMap)));
     final filename = cloudBackupFileName(
       prefix: tr('obtainiumExportHyphenatedLowercase'),
       at: DateTime.now(),
@@ -70,7 +70,8 @@ class CloudBackupActions {
     final bytes = await _service.download(cfg, entry);
     final raw = utf8.decode(bytes);
     final deviceCreds = <String, dynamic>{
-      for (final k in cloudBackupCredsKeys) k: settings.getSettingString(k) ?? '',
+      for (final k in cloudBackupCredsKeys)
+        k: settings.getSettingString(k) ?? '',
     };
     return applyCredsImportRule(raw, deviceCreds);
   }

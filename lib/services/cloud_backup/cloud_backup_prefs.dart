@@ -16,7 +16,8 @@ const String cloudBackupPrefKeyS3Secret = 'cloudBackupS3_secretAccessKey-creds';
 const String cloudBackupPrefKeyWebDavBaseUrl = 'cloudBackupWebDav_baseUrl';
 const String cloudBackupPrefKeyWebDavPrefix = 'cloudBackupWebDav_prefix';
 const String cloudBackupPrefKeyWebDavUsername = 'cloudBackupWebDav_username';
-const String cloudBackupPrefKeyWebDavPassword = 'cloudBackupWebDav_password-creds';
+const String cloudBackupPrefKeyWebDavPassword =
+    'cloudBackupWebDav_password-creds';
 
 /// Reads cloud-backup prefs into a [CloudBackupConfig]. [read] is the
 /// nullable-string getter (e.g. `settingsProvider.getSettingString`); a null

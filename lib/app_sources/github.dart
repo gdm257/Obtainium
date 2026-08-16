@@ -8,7 +8,6 @@ import 'package:http/http.dart';
 import 'package:obtainium/app_sources/html.dart';
 import 'package:obtainium/components/generated_form_model.dart';
 import 'package:obtainium/custom_errors.dart';
-import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -112,9 +111,16 @@ class GitHub extends AppSource {
         'includePrereleases',
         label: tr('includePrereleases'),
         value: false,
+        turnsOffKeys: const ['verifyLatestTag'],
       ),
     ],
-    [GeneratedFormSwitch('verifyLatestTag', label: tr('verifyLatestTag'))],
+    [
+      GeneratedFormSwitch(
+        'verifyLatestTag',
+        label: tr('verifyLatestTag'),
+        turnsOffKeys: const ['includePrereleases'],
+      ),
+    ],
     AppSource.fallbackToOlderReleasesFormItem,
     [
       GeneratedFormTextField(
@@ -302,7 +308,7 @@ class GitHub extends AppSource {
     final token = await getTokenIfAny(additionalSettings);
     final headers = <String, String>{};
     if (token != null && token.isNotEmpty) {
-      headers[HttpHeaders.authorizationHeader] = 'Token $token';
+      headers[HttpHeaders.authorizationHeader] = 'Bearer $token';
     }
     if (forAPKDownload == true) {
       headers[HttpHeaders.acceptHeader] = 'application/octet-stream';
@@ -312,6 +318,43 @@ class GitHub extends AppSource {
     } else {
       return null;
     }
+  }
+
+  @override
+  Future<Response> sourceRequest(
+    String url,
+    Map<String, dynamic> additionalSettings, {
+    bool followRedirects = true,
+    Object? postBody,
+  }) async {
+    final Response res = await super.sourceRequest(
+      url,
+      additionalSettings,
+      followRedirects: followRedirects,
+      postBody: postBody,
+    );
+    final String? token = await getTokenIfAny(additionalSettings);
+    if (res.statusCode == 401 && token != null && token.isNotEmpty) {
+      final Map<String, dynamic> unauthSettings = Map<String, dynamic>.from(
+        additionalSettings,
+      );
+      unauthSettings[githubCredsKey] = '';
+      final Response retryRes = await super.sourceRequest(
+        url,
+        unauthSettings,
+        followRedirects: followRedirects,
+        postBody: postBody,
+      );
+      if (retryRes.statusCode < 400) {
+        unawaited(
+          LogsProvider().add(
+            'GitHub API returned 401 with stored PAT. Retried unauthenticated successfully. Please check or update your GitHub Personal Access Token in Settings.',
+          ),
+        );
+        return retryRes;
+      }
+    }
+    return res;
   }
 
   Future<String?> getTokenIfAny(Map<String, dynamic> additionalSettings) async {
@@ -691,12 +734,19 @@ class GitHub extends AppSource {
       ? _getPublishDateFromRelease(rel)
       : _getNewestAssetDateFromRelease(rel);
 
-  void _sortGitHubReleases(
+  void sortGitHubReleases(
     List<dynamic> releases,
     String sortMethod,
     bool useLatestAssetDateAsReleaseDate,
   ) {
     if (sortMethod == 'none') return;
+
+    int compareReleaseDates(DateTime? firstDate, DateTime? secondDate) {
+      if (firstDate == null && secondDate == null) return 0;
+      if (firstDate == null) return -1;
+      if (secondDate == null) return 1;
+      return firstDate.compareTo(secondDate);
+    }
 
     // Precompute dates and (for smartname/name sorts) per-release format
     // sets once. Memoization in findStandardFormatsForVersion already handles
@@ -706,61 +756,95 @@ class GitHub extends AppSource {
     final Map<dynamic, DateTime?> dates = {};
     final Map<dynamic, Set<String>> formats = {};
     if (!isDateOnly) {
-      for (final r in releases) {
-        if (r == null) continue;
-        final name = (r['tag_name'] ?? r['name'])?.toString() ?? '';
-        formats[r] = findStandardFormatsForVersion(name, false);
+      for (final release in releases) {
+        if (release == null) continue;
+        final name = (release['tag_name'] ?? release['name'])?.toString() ?? '';
+        formats[release] = findStandardFormatsForVersion(name, false);
       }
     }
 
-    releases.sort((a, b) {
-      if (a == null) return -1;
-      if (b == null) return 1;
+    releases.sort((firstRelease, secondRelease) {
+      if (firstRelease == null && secondRelease == null) return 0;
+      if (firstRelease == null) return -1;
+      if (secondRelease == null) return 1;
 
       if (isDateOnly) {
-        final dateA = dates.putIfAbsent(
-          a,
-          () => _getReleaseDateFromRelease(a, useLatestAssetDateAsReleaseDate),
+        final firstDate = dates.putIfAbsent(
+          firstRelease,
+          () => _getReleaseDateFromRelease(
+            firstRelease,
+            useLatestAssetDateAsReleaseDate,
+          ),
         );
-        final dateB = dates.putIfAbsent(
-          b,
-          () => _getReleaseDateFromRelease(b, useLatestAssetDateAsReleaseDate),
+        final secondDate = dates.putIfAbsent(
+          secondRelease,
+          () => _getReleaseDateFromRelease(
+            secondRelease,
+            useLatestAssetDateAsReleaseDate,
+          ),
         );
-        return (dateA ?? DateTime(1)).compareTo(dateB ?? DateTime(0));
+        return compareReleaseDates(firstDate, secondDate);
       }
 
-      final nameA = a['tag_name'] ?? a['name'];
-      final nameB = b['tag_name'] ?? b['name'];
-      final stdFormats = formats[a]!.intersection(formats[b]!);
+      final firstName =
+          (firstRelease['tag_name'] ?? firstRelease['name'])?.toString() ?? '';
+      final secondName =
+          (secondRelease['tag_name'] ?? secondRelease['name'])?.toString() ??
+          '';
+      final standardFormats = formats[firstRelease]!.intersection(
+        formats[secondRelease]!,
+      );
 
-      if (sortMethod == 'smartname-datefallback' && stdFormats.isEmpty) {
-        final dateA = _getReleaseDateFromRelease(
-          a,
+      if (sortMethod == 'smartname-datefallback' && standardFormats.isEmpty) {
+        final firstDate = _getReleaseDateFromRelease(
+          firstRelease,
           useLatestAssetDateAsReleaseDate,
         );
-        final dateB = _getReleaseDateFromRelease(
-          b,
+        final secondDate = _getReleaseDateFromRelease(
+          secondRelease,
           useLatestAssetDateAsReleaseDate,
         );
-        return (dateA ?? DateTime(1)).compareTo(dateB ?? DateTime(0));
+        return compareReleaseDates(firstDate, secondDate);
       }
 
-      if (sortMethod != 'name' && stdFormats.isNotEmpty) {
-        final sortedFormats = stdFormats.toList()
-          ..sort((x, y) => y.length.compareTo(x.length));
-        final reg = RegExp(sortedFormats.first);
-        final matchA = reg.firstMatch(nameA);
-        final matchB = reg.firstMatch(nameB);
-        if (matchA == null || matchB == null) {
-          return compareAlphaNumeric(nameA as String, nameB as String);
+      if (sortMethod != 'name' && standardFormats.isNotEmpty) {
+        final sortedFormats = standardFormats.toList()
+          ..sort(
+            (firstPattern, secondPattern) =>
+                secondPattern.length.compareTo(firstPattern.length),
+          );
+        final standardFormatPattern = RegExp(
+          sortedFormats.first,
+          caseSensitive: false,
+        );
+        final firstMatch = standardFormatPattern.firstMatch(firstName);
+        final secondMatch = standardFormatPattern.firstMatch(secondName);
+        if (firstMatch != null && secondMatch != null) {
+          final versionComparison = compareAlphaNumeric(
+            firstName.substring(firstMatch.start, firstMatch.end).toLowerCase(),
+            secondName
+                .substring(secondMatch.start, secondMatch.end)
+                .toLowerCase(),
+          );
+          if (versionComparison != 0) return versionComparison;
         }
-        return compareAlphaNumeric(
-          (nameA as String).substring(matchA.start, matchA.end),
-          (nameB as String).substring(matchB.start, matchB.end),
-        );
       }
 
-      return compareAlphaNumeric(nameA as String, nameB as String);
+      final nameComparison = compareAlphaNumeric(
+        firstName.toLowerCase(),
+        secondName.toLowerCase(),
+      );
+      if (nameComparison != 0) return nameComparison;
+
+      final firstDate = _getReleaseDateFromRelease(
+        firstRelease,
+        useLatestAssetDateAsReleaseDate,
+      );
+      final secondDate = _getReleaseDateFromRelease(
+        secondRelease,
+        useLatestAssetDateAsReleaseDate,
+      );
+      return compareReleaseDates(firstDate, secondDate);
     });
   }
 
@@ -1001,7 +1085,8 @@ class GitHub extends AppSource {
             true
         ? additionalSettings['filterReleaseNotesByRegEx']
         : null;
-    final bool verifyLatestTag = additionalSettings['verifyLatestTag'] == true;
+    final bool verifyLatestTag =
+        additionalSettings['verifyLatestTag'] == true && !includePrereleases;
     final bool useLatestAssetDateAsReleaseDate =
         additionalSettings['useLatestAssetDateAsReleaseDate'] == true;
     final String sortMethod =
@@ -1046,7 +1131,7 @@ class GitHub extends AppSource {
       if (sortMethod == 'none') {
         releases = releases.reversed.toList();
       } else {
-        _sortGitHubReleases(
+        sortGitHubReleases(
           releases,
           sortMethod,
           useLatestAssetDateAsReleaseDate,
@@ -1170,6 +1255,21 @@ class GitHub extends AppSource {
             : githubAttestationStatusError;
       }
 
+      final List<String> rawReleaseTitleCandidates = <String>[];
+      for (final rel in releases) {
+        if (rel is Map<String, dynamic>) {
+          final String? title =
+              (rel['name'] as String?)?.trim().isNotEmpty == true
+              ? (rel['name'] as String).trim()
+              : (rel['tag_name'] as String?)?.trim();
+          if (title != null &&
+              title.isNotEmpty &&
+              !rawReleaseTitleCandidates.contains(title)) {
+            rawReleaseTitleCandidates.add(title);
+          }
+        }
+      }
+
       return APKDetails(
         version,
         apkUrls,
@@ -1178,6 +1278,7 @@ class GitHub extends AppSource {
         changeLog: changeLog.isEmpty ? null : changeLog,
         allAssetUrls:
             targetRelease['allAssetUrls'] as List<MapEntry<String, String>>,
+        rawReleaseTitleCandidates: rawReleaseTitleCandidates,
         apkSizeBytes: apkSizeBytes,
         attestationStatus: attestationStatus,
       );

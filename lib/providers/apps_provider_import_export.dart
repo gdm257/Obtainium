@@ -126,13 +126,13 @@ extension AppsProviderImportExport on AppsProvider {
     SettingsProvider? sp,
   }) async {
     final SettingsProvider settingsProvider = sp ?? this.settingsProvider;
+    if (isAuto && !settingsProvider.autoExportOnChanges) {
+      return null;
+    }
     var exportDir = await settingsProvider.getExportDir(
       warnIfInaccessible: true,
     );
     if (isAuto) {
-      if (!settingsProvider.autoExportOnChanges) {
-        return null;
-      }
       if (exportDir == null) {
         return null;
       }
@@ -252,7 +252,7 @@ extension AppsProviderImportExport on AppsProvider {
       final a = importedApps[i];
       final installedInfo = await getInstalledInfo(a.id);
       importedApps[i] = a.copyWith(
-        installedVersion: a.settings.getBool('useVersionCodeAsOSVersion')
+        installedVersion: a.usesVersionCodeAsOsVersion
             ? installedInfo?.versionCode.toString()
             : installedInfo?.versionName,
       );
@@ -453,6 +453,8 @@ const Set<String> obtainXOnlySettingKeys = {
   'showAppTypeBadge',
   'showTrackedStoreBadge',
   'showCategoriesBadge',
+  'showAuthorBadge',
+  'showVersionBadge',
   'saveDownloadedApkCopies',
   'apkSaveDir',
   'rightSwipeAction',
@@ -532,6 +534,11 @@ Map<String, dynamic> buildObtainXSettingsMap(
       fullSortColumn != obtainiumSettings['sortColumn']) {
     settingsObtainX['sortColumn'] = fullSortColumn;
   }
+  final dynamic fullInstallMethod = fullSettings['installMethod'];
+  if (fullInstallMethod != null &&
+      fullInstallMethod != obtainiumSettings['installMethod']) {
+    settingsObtainX['installMethod'] = fullInstallMethod;
+  }
 
   return settingsObtainX;
 }
@@ -576,6 +583,9 @@ void sanitizeExportedSettingsForObtainium(Map<String, dynamic> settings) {
   if (sortColumn is int &&
       (sortColumn < 0 || sortColumn >= obtainiumSortColumnCount)) {
     settings['sortColumn'] = SortColumnSettings.releaseDate.index;
+  }
+  if (settings['installMethod'] == 'dhizuku') {
+    settings['installMethod'] = 'shizuku';
   }
 }
 

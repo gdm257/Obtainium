@@ -70,10 +70,7 @@ class WebDavClient {
     final resp = await _send(
       method: 'PROPFIND',
       url: collectionUrl,
-      headers: {
-        'Depth': '1',
-        'Content-Type': 'application/xml; charset=utf-8',
-      },
+      headers: {'Depth': '1', 'Content-Type': 'application/xml; charset=utf-8'},
       body: Uint8List.fromList(utf8.encode(_propfindBody)),
       username: username,
       password: password,

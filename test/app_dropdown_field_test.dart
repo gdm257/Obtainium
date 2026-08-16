@@ -76,4 +76,51 @@ void main() {
       expect(measuredWidth, 150);
     },
   );
+
+  testWidgets(
+    'externally controlled dropdown keeps its saved value after rejection',
+    (WidgetTester tester) async {
+      String? requestedValue;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (BuildContext context) {
+                return appDropdownField<String>(
+                  context: context,
+                  value: 'system',
+                  updateInternalValueOnChange: false,
+                  items: const <DropdownMenuItem<String>>[
+                    DropdownMenuItem<String>(
+                      value: 'system',
+                      child: Text('System'),
+                    ),
+                    DropdownMenuItem<String>(
+                      value: 'shizuku',
+                      child: Text('Shizuku'),
+                    ),
+                  ],
+                  onChanged: (String? value) {
+                    requestedValue = value;
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byType(DropdownButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Shizuku').last);
+      await tester.pumpAndSettle();
+
+      final DropdownButton<String> dropdown = tester.widget(
+        find.byType(DropdownButton<String>),
+      );
+      expect(requestedValue, 'shizuku');
+      expect(dropdown.value, 'system');
+    },
+  );
 }

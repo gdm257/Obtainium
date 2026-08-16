@@ -5,6 +5,8 @@ import 'package:obtainium/components/theme_accent_settings_section.dart'
     show buildThemeAccentSettingsCardItems;
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/components/tv_slider_wrapper.dart';
+import 'package:obtainium/components/ui_widgets.dart'
+    show AppSwitch, AppSwitchListTile;
 import 'package:obtainium/theme/app_segmented_button_theme.dart';
 import 'package:obtainium/theme/m3e_expressive_list.dart';
 import 'package:obtainium/widgets/help_hint_icon.dart';
@@ -88,7 +90,7 @@ List<Widget> buildThemesSettingsCardItems(
       ),
     ),
     if (settings.theme != ThemeSettings.light)
-      SwitchListTile(
+      AppSwitchListTile(
         title: Text(tr('useBlackTheme')),
         value: settings.useBlackTheme,
         onChanged: (bool value) {
@@ -101,7 +103,7 @@ List<Widget> buildThemesSettingsCardItems(
       title: Text(tr('settingsGradientBackground')),
       trailing: IgnorePointer(
         ignoring: settings.blackThemeActive,
-        child: Switch(
+        child: AppSwitch(
           value: settings.useGradientBackground,
           onChanged: settings.blackThemeActive
               ? null
@@ -127,7 +129,7 @@ List<Widget> buildThemesSettingsCardItems(
             message: tr('settingsProgressiveBlurSubtitle'),
             padding: EdgeInsets.zero,
           ),
-          Switch(
+          AppSwitch(
             value: settings.progressiveBlurEnabled,
             onChanged: settings.reduceVisualEffects
                 ? null
@@ -147,7 +149,7 @@ List<Widget> buildThemesSettingsCardItems(
                   !settings.progressiveBlurEnabled;
             },
     ),
-    SwitchListTile(
+    AppSwitchListTile(
       title: Text(tr('matchAppPageToIconColors')),
       value: settings.matchAppPageToIconColors,
       onChanged: (bool value) {
@@ -167,7 +169,7 @@ List<Widget> buildThemesSettingsCardItems(
             message: tr('settingsReduceVisualEffectsSubtitle'),
             padding: EdgeInsets.zero,
           ),
-          Switch(
+          AppSwitch(
             value: settings.reduceVisualEffects,
             onChanged: (bool value) {
               settings.reduceVisualEffects = value;
