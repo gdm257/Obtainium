@@ -121,6 +121,9 @@ Future<void> processDownloadResultsAsReady<T>({
   }
 }
 
+// Outcome of the pre-install VirusTotal gate (see _handleMalwareScanResult).
+enum _MalwareScanGateDecision { proceed, declined, retryScan }
+
 class _InstallResult {
   final String id;
   final bool willBeSilent;
@@ -383,6 +386,7 @@ extension AppsProviderInstall on AppsProvider {
     bool allowUserInteraction = false,
     NotificationsProvider? notificationsProvider,
     bool useExisting = true,
+    void Function(double? progress, int? received, int? total)? onProgress,
   }) async {
     final initialNotification = DownloadNotification(
       app.finalName,
@@ -481,6 +485,7 @@ extension AppsProviderInstall on AppsProvider {
         int? received,
         int? total,
       ]) {
+        onProgress?.call(progress, received, total);
         final int? prog = progress?.ceil();
         if (apps[app.id] != null) {
           apps[app.id]!.downloadReceivedBytes = received;
@@ -586,7 +591,10 @@ extension AppsProviderInstall on AppsProvider {
           unawaited(notificationsProvider?.notify(notif));
         }
       }
+      onProgress?.call(_remainingStepsProgress.toDouble(), null, null);
       PackageInfo? newInfo;
+      // The archive [newInfo] came from, kept so its icon can be salvaged too.
+      String? parsedArchivePath;
       final originalAssetName = app.apkUrls[app.preferredApkIndex].key
           .toLowerCase();
       final isAPK = downloadedFile.path.toLowerCase().endsWith('.apk');
@@ -598,6 +606,7 @@ extension AppsProviderInstall on AppsProvider {
           originalAssetName.endsWith('.tar.xz');
       Directory? apkDir;
       if (isAPK) {
+        parsedArchivePath = downloadedFile.path;
         newInfo = await packageManager.getPackageArchiveInfo(
           archiveFilePath: downloadedFile.path,
         );
@@ -650,6 +659,7 @@ extension AppsProviderInstall on AppsProvider {
               archiveFilePath: apks[i].path,
             );
             if (newInfo != null) {
+              parsedArchivePath = apks[i].path;
               break;
             }
           } catch (e) {
@@ -674,6 +684,16 @@ extension AppsProviderInstall on AppsProvider {
       );
       downloadedFile = renamedFile;
       final String resolvedAppId = resolvedApp.id;
+      // handleAPKIDChange renames a bare APK once the real package id is known.
+      if (isAPK) {
+        parsedArchivePath = downloadedFile.path;
+      }
+      // Deduced icons are only ever read for apps that aren't installed yet, so
+      // skip the extraction cost entirely on ordinary updates to installed apps.
+      if (parsedArchivePath != null &&
+          apps[resolvedAppId]?.installedInfo == null) {
+        await storeIconFromApkArchive(resolvedAppId, parsedArchivePath);
+      }
       // Delete older versions of the file if any (keyed to the resolved id,
       // since the id may have changed from a placeholder to the real package).
       for (var file in downloadedFile.parent.listSync()) {
@@ -1629,7 +1649,7 @@ extension AppsProviderInstall on AppsProvider {
     // rather than a frozen percentage. If a VirusTotal scan will run first, lead
     // with "Scanning" so the indicator doesn't flash "Installing" before the scan
     // (the scan step later flips this to "Flagged"/"Installing" as appropriate).
-    appEntry.downloadProgress = willScanApkWithVirusTotal()
+    appEntry.downloadProgress = willScanApkWithVirusTotal(appEntry.app)
         ? _scanningProgressSentinel
         : _installingProgressSentinel;
     notify();
@@ -1879,7 +1899,7 @@ extension AppsProviderInstall on AppsProvider {
   ) async {
     try {
       final String downloadPath = '${await getStorageRootPath()}/Download';
-      await downloadFile(
+      final File downloadedFile = await downloadFile(
         fileUrl.value,
         fileUrl.key,
         true,
@@ -1909,7 +1929,18 @@ extension AppsProviderInstall on AppsProvider {
       );
       unawaited(
         notificationsProvider.notify(
-          DownloadedNotification(fileUrl.key, fileUrl.value),
+          DownloadedNotification(
+            fileUrl.key,
+            fileUrl.value,
+            installFilePath:
+                AppSource.isApkOrContainerFile(
+                  downloadedFile.path,
+                  includeArchives: true,
+                  includeTarballs: true,
+                )
+                ? downloadedFile.path
+                : null,
+          ),
         ),
       );
       downloadedIds.add(fileUrl.key);
@@ -1922,6 +1953,25 @@ extension AppsProviderInstall on AppsProvider {
         notificationsProvider.cancel(DownloadNotification(fileUrl.key, 0).id),
       );
     }
+  }
+
+  /// Hands a file downloaded to the public Download folder off to the device's
+  /// default handler for it, driven by the Install action on the
+  /// download-complete notification. This is the same outcome as the user
+  /// tapping the file in a file manager: ObtainX plays no part in resolving,
+  /// extracting, verifying, or installing it, and takes no further part once
+  /// the handoff intent is launched.
+  Future<void> installDownloadedAssetFile(String filePath) async {
+    if (!File(filePath).existsSync()) {
+      unawaited(
+        LogsProvider().add(
+          'Install notification tapped for missing file: $filePath',
+          level: LogLevel.error,
+        ),
+      );
+      return;
+    }
+    await viewInstallableFile(filePath);
   }
 
   /// Verifies a downloaded GitHub artifact's SHA-256 against its build
@@ -1952,21 +2002,26 @@ extension AppsProviderInstall on AppsProvider {
     return githubAttestationStatusError;
   }
 
-  /// Whether a VirusTotal scan will actually run for the next install (feature
-  /// toggle on and a validated API key present).
-  bool willScanApkWithVirusTotal() {
+  /// Whether a VirusTotal scan will actually run for [app]'s next install: the
+  /// global feature toggle is on with a validated API key, AND this app has not
+  /// been excluded by switching its per-app [enableVirusTotalScanKey] off. The
+  /// per-app exclusion exists for apps whose source already publishes its own
+  /// scan results, and for APKs too large to be worth uploading (VirusTotal caps
+  /// uploads at 650MB even via the upload_url flow).
+  ///
+  /// `defaultValue: true` is load-bearing - see [enableVirusTotalScanKey]. This is
+  /// the only place the key is read.
+  ///
+  /// The per-app check deliberately comes before the debug force so the exclusion
+  /// can be exercised in debug builds.
+  bool willScanApkWithVirusTotal(App app) {
+    if (!app.settings.getBool(enableVirusTotalScanKey, defaultValue: true)) {
+      return false;
+    }
     if (kDebugMode && debugForceFlaggedMalwareScan) {
       return true;
     }
-    if (!settingsProvider.enableVirusTotalScanning) {
-      return false;
-    }
-    final String? apiKey = settingsProvider.getSettingString(
-      virusTotalApiKeyKey,
-    );
-    return apiKey != null &&
-        apiKey.isNotEmpty &&
-        hasValidatedApiKey(apiKey, settingsProvider);
+    return virusTotalScanningAvailable(settingsProvider);
   }
 
   /// Scans a downloaded APK with VirusTotal, when scanning is enabled and an API
@@ -1977,6 +2032,9 @@ extension AppsProviderInstall on AppsProvider {
   /// copyWith.
   Future<({String? status, String? detail, String? reportUrl})>
   scanApkWithVirusTotal(App app, File file) async {
+    if (!willScanApkWithVirusTotal(app)) {
+      return (status: null, detail: null, reportUrl: null);
+    }
     if (kDebugMode && debugForceFlaggedMalwareScan) {
       final hash = await sha256.bind(file.openRead()).first;
       return (
@@ -1986,9 +2044,6 @@ extension AppsProviderInstall on AppsProvider {
             'debugForceFlaggedMalwareScan is on)',
         reportUrl: 'https://www.virustotal.com/gui/file/$hash',
       );
-    }
-    if (!willScanApkWithVirusTotal()) {
-      return (status: null, detail: null, reportUrl: null);
     }
     final String apiKey = settingsProvider.getSettingString(
       virusTotalApiKeyKey,
@@ -2017,14 +2072,42 @@ extension AppsProviderInstall on AppsProvider {
     }
   }
 
+  /// [scanApkWithVirusTotal] with the "Scanning with VirusTotal" busy state
+  /// showing while it works. Also used for a user-requested rescan, where the
+  /// previous round left the "Flagged" state on screen.
+  Future<({String? status, String? detail, String? reportUrl})>
+  _scanApkWithVirusTotalShowingProgress(
+    String appId,
+    App app,
+    File primaryFile,
+  ) async {
+    if (willScanApkWithVirusTotal(app)) {
+      apps[appId]?.downloadProgress = _scanningProgressSentinel;
+      notify();
+    }
+    return scanApkWithVirusTotal(app, primaryFile);
+  }
+
   /// Acts on a [scanApkWithVirusTotal] result: `clean` never interrupts;
   /// `flagged`/`error` pause with a decision dialog when someone is watching
   /// ([showMalwareScanDialog]), or skip the app (throwing
-  /// [MalwareScanBlockedError]) when there is no one to ask. [cleanupOnSkip]
-  /// deletes whatever was downloaded. Returns true to proceed, false when the
-  /// watching user declined (a deliberate choice, not a failure — callers must
-  /// return quietly rather than throw).
-  Future<bool> _handleMalwareScanResult({
+  /// [MalwareScanBlockedError]) when there is no one to ask.
+  ///
+  /// [cleanupOnSkip] deletes whatever was downloaded, but it only runs for a
+  /// `flagged` verdict. An `error` status means VirusTotal never returned a
+  /// verdict at all (offline, rate limited, key rejected, VT still analyzing
+  /// past our poll window) — the APK is then no more suspect than one downloaded
+  /// with scanning switched off, so deleting it buys no safety while costing the
+  /// user a full re-download (see issue #240). Keeping it makes a retry nearly
+  /// free: [downloadFile]'s `useExisting` path returns the cached APK, and
+  /// VirusTotal's by-hash lookup usually has a finished analysis by then.
+  ///
+  /// Returns [_MalwareScanGateDecision.proceed] to install,
+  /// [_MalwareScanGateDecision.declined] when the watching user cancelled (a
+  /// deliberate choice, not a failure — callers must return quietly rather than
+  /// throw), or [_MalwareScanGateDecision.retryScan] when they asked to scan the
+  /// same file again (only offered for `error`).
+  Future<_MalwareScanGateDecision> _handleMalwareScanResult({
     required App app,
     required String status,
     String? detail,
@@ -2041,32 +2124,39 @@ extension AppsProviderInstall on AppsProvider {
           theme: toastTheme,
         );
       }
-      return true;
+      return _MalwareScanGateDecision.proceed;
     }
+    final bool deleteDownloadOnSkip = status == malwareScanStatusFlagged;
     if (showMalwareScanDialog) {
       final NavigatorState? navigator = globalNavigatorKey.currentState;
-      if (navigator == null || !navigator.mounted) return true;
-      final ThemeData dialogTheme = Theme.of(navigator.context);
-      final bool? proceed = await showDialog<bool>(
-        context: navigator.context,
-        barrierDismissible: false,
-        builder: (BuildContext ctx) => Theme(
-          data: dialogTheme,
-          child: MalwareScanWarningDialog(
-            appName: app.finalName,
-            status: status,
-            detail: detail,
-            reportUrl: reportUrl,
-          ),
-        ),
-      );
-      if (proceed == true) {
-        return true;
+      if (navigator == null || !navigator.mounted) {
+        return _MalwareScanGateDecision.proceed;
       }
-      cleanupOnSkip();
-      return false;
+      final ThemeData dialogTheme = Theme.of(navigator.context);
+      final MalwareScanDialogChoice? choice =
+          await showDialog<MalwareScanDialogChoice>(
+            context: navigator.context,
+            barrierDismissible: false,
+            builder: (BuildContext ctx) => Theme(
+              data: dialogTheme,
+              child: MalwareScanWarningDialog(
+                appName: app.finalName,
+                status: status,
+                detail: detail,
+                reportUrl: reportUrl,
+              ),
+            ),
+          );
+      if (choice == MalwareScanDialogChoice.installAnyway) {
+        return _MalwareScanGateDecision.proceed;
+      }
+      if (choice == MalwareScanDialogChoice.retryScan) {
+        return _MalwareScanGateDecision.retryScan;
+      }
+      if (deleteDownloadOnSkip) cleanupOnSkip();
+      return _MalwareScanGateDecision.declined;
     }
-    cleanupOnSkip();
+    if (deleteDownloadOnSkip) cleanupOnSkip();
     throw MalwareScanBlockedError(status, detail, appName: app.finalName);
   }
 
@@ -2334,13 +2424,16 @@ extension AppsProviderInstall on AppsProvider {
     // VirusTotal malware scan. Surface "Scanning with VirusTotal" while it runs
     // (the caller set "Installing"/"Scanning" up front, but the scan is the part
     // that actually takes time), then reflect a flagged/errored result as
-    // "Flagged" before prompting the user to decide.
-    if (willScanApkWithVirusTotal()) {
-      apps[appId]?.downloadProgress = _scanningProgressSentinel;
-      notify();
-    }
-    final scan = await scanApkWithVirusTotal(app, primaryFile);
-    if (scan.status != null) {
+    // "Flagged" before prompting the user to decide. "Retry scan" loops back
+    // through the same scan → persist → prompt cycle against the same file: the
+    // by-hash lookup usually finds a finished analysis on the second pass, which
+    // is exactly why a merely-failed scan keeps the APK instead of deleting it.
+    var scan = await _scanApkWithVirusTotalShowingProgress(
+      appId,
+      app,
+      primaryFile,
+    );
+    while (scan.status != null) {
       app = app.copyWith(
         latestMalwareScanStatus: scan.status,
         latestMalwareScanDetail: scan.detail,
@@ -2354,7 +2447,7 @@ extension AppsProviderInstall on AppsProvider {
           : _installingProgressSentinel;
       notify();
       await saveApps([app], updateInstalledInfo: false);
-      final bool proceed = await _handleMalwareScanResult(
+      final _MalwareScanGateDecision decision = await _handleMalwareScanResult(
         app: app,
         status: scan.status!,
         detail: scan.detail,
@@ -2363,10 +2456,19 @@ extension AppsProviderInstall on AppsProvider {
         toastTheme: toastTheme,
         cleanupOnSkip: cleanupOnSkip,
       );
-      if (!proceed) return false;
+      if (decision == _MalwareScanGateDecision.declined) return false;
+      if (decision == _MalwareScanGateDecision.retryScan) {
+        scan = await _scanApkWithVirusTotalShowingProgress(
+          appId,
+          app,
+          primaryFile,
+        );
+        continue;
+      }
       if (showMalwareScanDialog && scan.status != malwareScanStatusClean) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
       }
+      break;
     }
     // Scan cleared (or was skipped) and we're proceeding — hand back to the
     // installer as "Installing" so a lingering "Scanning"/"Flagged" state clears.

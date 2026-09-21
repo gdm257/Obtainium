@@ -9,14 +9,16 @@ import 'package:obtainium/components/ui_widgets.dart'
     show AppSwitch, AppSwitchListTile;
 import 'package:obtainium/theme/app_segmented_button_theme.dart';
 import 'package:obtainium/theme/m3e_expressive_list.dart';
+import 'package:obtainium/widgets/app_toast.dart';
 import 'package:obtainium/widgets/help_hint_icon.dart';
 import 'package:provider/provider.dart';
 
 void _showBlackThemeSurfaceSettingDisabledSnackbar(BuildContext context) {
   ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(tr('settingsGradientDisabledInBlackTheme')),
-      duration: const Duration(seconds: 4),
+    buildAppSnackBar(
+      context,
+      tr('settingsGradientDisabledInBlackTheme'),
+      type: ToastType.warning,
     ),
   );
 }

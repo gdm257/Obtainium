@@ -36,6 +36,7 @@ import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/store_source_icons.dart';
 import 'package:obtainium/services/bulk_import_service.dart';
 import 'package:obtainium/services/bulk_scan_cache.dart';
+import 'package:obtainium/services/store_icon_resolver.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:provider/provider.dart';
@@ -183,6 +184,11 @@ String? _resolveStoreUrl({
   }
   final entry = storeData[storeName]!;
   if (entry.isEmpty) return null; // confirmed absent (empty string sentinel)
+  if (storeName == 'APKPure' && !isWellFormedApkPureUrl(entry)) {
+    // Known-broken shape from a past bug - don't surface a link we know
+    // 404s just because it's sitting in the cache.
+    return null;
+  }
   return entry; // confirmed present
 }
 
@@ -370,47 +376,99 @@ class _DownloadProgressAction extends StatelessWidget {
               ? tr('flaggedByVirusTotal')
               : tr('virusTotalScanFailed'))
         : tr('downloadingX', args: ['${dp.round()}%$bytesLabel']);
-    final Color barColor = isFlaggedState
-        ? actionTheme.colorScheme.error
-        : actionTheme.colorScheme.primary;
-    final Color textColor = isFlaggedState
-        ? actionTheme.colorScheme.onError
-        : actionTheme.colorScheme.onSurface.withAlpha(200);
     final Widget progressBar = ClipRRect(
       borderRadius: BorderRadius.circular(expressiveRadius),
       child: SizedBox(
         height: 52,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Container(color: actionTheme.colorScheme.onSurface.withAlpha(31)),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: FractionallySizedBox(
-                widthFactor: (isBusy || isFlaggedState) ? 1.0 : dp / 100,
-                child: Container(
-                  color: barColor.withAlpha(
-                    isFlaggedState ? 220 : (isBusy ? 55 : 220),
+        child: isFlaggedState
+            ? Container(
+                color: actionTheme.colorScheme.error,
+                alignment: Alignment.center,
+                child: Text(
+                  label,
+                  style: actionTheme.textTheme.labelLarge?.copyWith(
+                    color: actionTheme.colorScheme.onError,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
+              )
+            : isBusy
+            ? Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(
+                    color: actionTheme.colorScheme.surfaceContainerHighest,
+                  ),
+                  LinearProgressIndicator(
+                    backgroundColor: Colors.transparent,
+                    color: actionTheme.colorScheme.primary,
+                  ),
+                  Center(
+                    child: Text(
+                      label,
+                      style: actionTheme.textTheme.labelLarge?.copyWith(
+                        color: actionTheme.colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  final double progress = (dp / 100).clamp(0.0, 1.0);
+                  final double fillWidth = constraints.maxWidth * progress;
+
+                  Widget buildCenteredLabel(Color textColor) => Center(
+                    child: Text(
+                      label,
+                      style: actionTheme.textTheme.labelLarge?.copyWith(
+                        color: textColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  );
+
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Container(
+                        color: actionTheme.colorScheme.surfaceContainerHighest,
+                      ),
+                      buildCenteredLabel(
+                        actionTheme.colorScheme.onSurfaceVariant,
+                      ),
+                      if (fillWidth > 0)
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: fillWidth,
+                          child: ClipRect(
+                            child: OverflowBox(
+                              alignment: Alignment.centerLeft,
+                              minWidth: constraints.maxWidth,
+                              maxWidth: constraints.maxWidth,
+                              minHeight: constraints.maxHeight,
+                              maxHeight: constraints.maxHeight,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Container(
+                                    color: actionTheme.colorScheme.primary,
+                                  ),
+                                  buildCenteredLabel(
+                                    actionTheme.colorScheme.onPrimary,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
-            ),
-            if (isBusy)
-              LinearProgressIndicator(
-                backgroundColor: Colors.transparent,
-                color: actionTheme.colorScheme.primary.withAlpha(120),
-              ),
-            Center(
-              child: Text(
-                label,
-                style: actionTheme.textTheme.labelLarge?.copyWith(
-                  color: textColor,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
     return Column(
@@ -1037,9 +1095,9 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
   }
 
   Future<void> _pickEditIcon(AppsProvider appsProvider) async {
-    final FilePickerResult? result;
+    final PlatformFile? picked;
     try {
-      result = await FilePicker.pickFiles(
+      picked = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: const ['png'],
       );
@@ -1053,8 +1111,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       return;
     }
     if (!mounted) return;
-    if (result == null || result.files.isEmpty) return;
-    final PlatformFile picked = result.files.single;
+    if (picked == null) return;
     final Uint8List? bytes = await _readPickedFileBytes(picked);
     if (bytes == null) return;
     if (!appsProvider.validateUserAppIconPngBytes(bytes)) {
@@ -1853,18 +1910,28 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
   /// After a pull-to-refresh, checks all 4 stores (APKMirror, F-Droid, APKPure,
   /// Play Store) for this single app concurrently. Cached stores are skipped,
   /// except that APKMirror is rechecked when its existing availability response
-  /// can also fill a missing app icon. Caches results and triggers a
-  /// FutureBuilder rebuild so the Other Sources row updates in place.
+  /// can also fill a missing app icon. Presence always runs for every store
+  /// that is still uncached. Icon resolution is separate: APKMirror API icon
+  /// first, then listing-page icons APKMirror -> F-Droid -> APKPure -> Play
+  /// Store, stopping at the first hit - and skipped entirely for installed apps
+  /// or when an icon was already extracted from a downloaded APK. Caches results
+  /// and triggers a FutureBuilder rebuild so the Other Sources row updates in
+  /// place.
   Future<void> _maybeCheckAndCacheAllStores(String appId) async {
     if (appId.isEmpty || !mounted) return;
 
     final appsProvider = Provider.of<AppsProvider>(context, listen: false);
     final AppInMemory? appBeforeStoreCheck = appsProvider.apps[appId];
     final trackedUrl = appBeforeStoreCheck?.app.url;
+    // No icon to hunt for when the device already supplies one (app is
+    // installed), or when one was deduced from a downloaded APK and stored
+    // permanently - that one is authoritative and needs no improving on.
     final shouldResolveMissingIcon =
         appBeforeStoreCheck != null &&
         appBeforeStoreCheck.icon == null &&
-        appBeforeStoreCheck.app.iconUrl?.isNotEmpty != true;
+        appBeforeStoreCheck.installedInfo == null &&
+        appBeforeStoreCheck.app.iconUrl?.isNotEmpty != true &&
+        !appsProvider.hasDeducedAppIcon(appId);
 
     final cache = await BulkScanCache.load();
     final storeData = cache[appId] ?? {};
@@ -1889,8 +1956,10 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
         ]).then((result) => MapEntry('F-Droid', result[appId])),
       );
     }
+    final String cachedApkPureUrl = storeData['APKPure'] ?? '';
     if (!_trackedUrlIsFromHost(trackedUrl, 'apkpure.') &&
-        (storeData['APKPure'] ?? '').isEmpty) {
+        (cachedApkPureUrl.isEmpty ||
+            !isWellFormedApkPureUrl(cachedApkPureUrl))) {
       futures.add(
         BulkImportService.checkApkPure([
           appId,
@@ -1906,27 +1975,45 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       );
     }
 
-    if (futures.isEmpty) return;
-
-    final results = await Future.wait(futures);
-
     final entry = cache.putIfAbsent(appId, () => {});
-    for (final result in results) {
-      if (result.value != null || (entry[result.key] ?? '').isEmpty) {
-        entry[result.key] = result.value ?? '';
+    if (futures.isNotEmpty) {
+      final results = await Future.wait(futures);
+      for (final result in results) {
+        final String existing = entry[result.key] ?? '';
+        // A malformed cached APKPure entry is never usable - a fresh "not
+        // found" (null) result must be allowed to overwrite it with the
+        // empty-string sentinel, not just a fresh URL. Every other store's
+        // cached value is trusted as-is once non-empty.
+        final bool existingIsUsable = result.key == 'APKPure'
+            ? existing.isNotEmpty && isWellFormedApkPureUrl(existing)
+            : existing.isNotEmpty;
+        if (result.value != null || !existingIsUsable) {
+          entry[result.key] = result.value ?? '';
+        }
       }
+      await BulkScanCache.save(cache);
+    } else if (!shouldResolveMissingIcon) {
+      return;
     }
-    await BulkScanCache.save(cache);
 
-    final String? apkMirrorIconUrl = apkMirrorIconUrls[appId];
+    String? resolvedIconUrl;
+    if (shouldResolveMissingIcon) {
+      resolvedIconUrl = await resolveIconUrlFromOtherStores(
+        apkMirrorIconUrl: apkMirrorIconUrls[appId],
+        apkMirrorListingUrl: entry['APKMirror'],
+        fdroidListingUrl: entry['F-Droid'],
+        apkPureListingUrl: entry['APKPure'],
+        playStoreListingUrl: entry['PlayStore'],
+      );
+    }
     final AppInMemory? currentApp = appsProvider.apps[appId];
-    if (apkMirrorIconUrl != null &&
+    if (resolvedIconUrl != null &&
         currentApp != null &&
         currentApp.icon == null &&
         currentApp.app.iconUrl?.isNotEmpty != true &&
         currentApp.app.url == trackedUrl) {
       await appsProvider.saveApps([
-        currentApp.app.copyWith(iconUrl: apkMirrorIconUrl),
+        currentApp.app.copyWith(iconUrl: resolvedIconUrl),
       ], updateInstalledInfo: false);
       await appsProvider.updateAppIcon(appId);
     }
@@ -2166,6 +2253,12 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
           context,
           listen: false,
         ).updateAppIcon(widget.appId, ignoreCache: false);
+        // updateAppIcon only falls back to an already-set App.iconUrl - it
+        // doesn't go looking for one. Without this, a freshly-added app whose
+        // source publishes no icon stays iconless until the user manually
+        // pulls to refresh (which is what actually resolves iconUrl via the
+        // other stores below).
+        unawaited(_maybeCheckAndCacheAllStores(widget.appId));
       });
     }
     if (widget.openInEditMode &&
@@ -4826,7 +4919,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
           child: actionBarContent,
         );
       }
-      if (gestureNavigationActive && !widget.isEmbedded) {
+      if (gestureNavigationActive || widget.isEmbedded) {
         actionBarContent = SafeArea(top: false, child: actionBarContent);
       }
       final Widget actionBarSurface = Container(

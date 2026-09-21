@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:obtainium/providers/settings_provider.dart';
+import 'package:obtainium/widgets/app_toast.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
@@ -12,7 +13,7 @@ Future<void> copyToClipboard(BuildContext context, String text) async {
   if (context.mounted) {
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(tr('copiedToClipboard'))));
+    ).showSnackBar(buildAppSnackBar(context, tr('copiedToClipboard')));
   }
 }
 

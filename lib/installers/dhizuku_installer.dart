@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/installers/installer.dart';
+import 'package:obtainium/installers/shizuku_plugin.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:shizuku_apk_installer/shizuku_apk_installer.dart';
 
@@ -19,19 +20,17 @@ class DhizukuInstaller extends Installer {
   Future<bool> canInstallSilently(App app) async => true;
 
   @override
-  Future<bool> checkPermission() async {
-    final ShizukuApkInstaller dhizukuInstaller = ShizukuApkInstaller();
-    await dhizukuInstaller.setInstallerMode(InstallerMode.dhizuku);
-    final String? res = await dhizukuInstaller.checkPermission();
-    return res == 'granted_owner';
-  }
+  Future<bool> checkPermission() async => isShizukuPluginPermissionGranted(
+    InstallerMode.dhizuku,
+    await checkShizukuPluginPermission(InstallerMode.dhizuku),
+  );
 
   @override
   Future<void> ensurePermission({ThemeData? toastTheme}) async {
-    final ShizukuApkInstaller dhizukuInstaller = ShizukuApkInstaller();
-    await dhizukuInstaller.setInstallerMode(InstallerMode.dhizuku);
-    final String? res = await dhizukuInstaller.checkPermission();
-    if (res == 'granted_owner') return;
+    final String? res = await checkShizukuPluginPermission(
+      InstallerMode.dhizuku,
+    );
+    if (isShizukuPluginPermissionGranted(InstallerMode.dhizuku, res)) return;
     switch (res) {
       case 'services_not_found':
         throw ObtainiumError(tr('dhizukuBinderNotFound'));

@@ -5,12 +5,14 @@ import 'package:crypto/crypto.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart';
+import 'package:obtainium/app_sources/gradle_app_id.dart';
 import 'package:obtainium/app_sources/html.dart';
 import 'package:obtainium/components/generated_form_model.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
+import 'package:obtainium/widgets/app_toast.dart';
 import 'package:provider/provider.dart';
 
 Map<String, dynamic>? _jsonObjectFromResponseBody(String responseBody) {
@@ -215,78 +217,31 @@ class GitHub extends AppSource {
     String standardUrl, {
     Map<String, dynamic> additionalSettings = const {},
   }) async {
-    const possibleBuildGradleLocations = [
-      '/app/build.gradle',
-      'android/app/build.gradle',
-      'src/app/build.gradle',
-    ];
-    for (var path in possibleBuildGradleLocations) {
-      try {
+    // Parsing lives in gradle_app_id.dart so GitLab, Codeberg and SourceHut
+    // share it — see the notes there on the Kotlin-DSL gap this closed.
+    final String apiUrl = await convertStandardUrlToAPIUrl(
+      standardUrl,
+      additionalSettings,
+    );
+    return inferAppIdFromGradleFiles(
+      (String path) async {
         final res = await sourceRequest(
-          '${await convertStandardUrlToAPIUrl(standardUrl, additionalSettings)}/contents/$path',
+          '$apiUrl/contents/$path',
           additionalSettings,
         );
-        if (res.statusCode == 200) {
-          try {
-            final body = jsonDecode(res.body);
-            final trimmedLines = utf8
-                .decode(
-                  base64.decode(
-                    body['content'].toString().split('\n').join(''),
-                  ),
-                )
-                .split('\n')
-                .map((e) => e.trim());
-            var appIds = trimmedLines.where(
-              (l) =>
-                  l.startsWith('applicationId "') ||
-                  l.startsWith('applicationId \''),
-            );
-            appIds = appIds.map((appId) {
-              final parts = appId.split(
-                appId.startsWith('applicationId "') ? '"' : '\'',
-              );
-              return parts.length > 1 ? parts[1] : '';
-            });
-            appIds = appIds
-                .map((appId) {
-                  if (appId.startsWith('\${') && appId.endsWith('}')) {
-                    final varLine = trimmedLines
-                        .where(
-                          (l) => l.startsWith(
-                            'def ${appId.substring(2, appId.length - 1)}',
-                          ),
-                        )
-                        .firstOrNull;
-                    if (varLine == null) return '';
-                    final parts = varLine.split(
-                      varLine.contains('"') ? '"' : '\'',
-                    );
-                    appId = parts.length > 1 ? parts[1] : '';
-                  }
-                  return appId;
-                })
-                .where((appId) => appId.isNotEmpty);
-            if (appIds.length == 1) {
-              return appIds.first;
-            }
-          } catch (err) {
-            unawaited(
-              LogsProvider().add(
-                'Error parsing build.gradle from ${res.request?.url.toString() ?? standardUrl}: ${err.toString()}',
-              ),
-            );
-          }
-        }
-      } catch (err) {
-        unawaited(
-          LogsProvider().add(
-            'Failed to extract ID from build.gradle or APK: ${err.toString()}',
-          ),
+        if (res.statusCode != 200) return null;
+        return decodeRepoContentsApiBody(res.body);
+      },
+      listRepoFilePaths: () async {
+        final res = await sourceRequest(
+          '$apiUrl/git/trees/HEAD?recursive=1',
+          additionalSettings,
         );
-      }
-    }
-    return null;
+        if (res.statusCode != 200) return null;
+        return repoFilePathsFromTreeApiBody(res.body);
+      },
+      onError: (String message) => unawaited(LogsProvider().add(message)),
+    );
   }
 
   @override
@@ -450,7 +405,7 @@ class GitHub extends AppSource {
         headers: <String, String>{
           HttpHeaders.authorizationHeader: 'Bearer $token',
           HttpHeaders.acceptHeader: 'application/vnd.github+json',
-          HttpHeaders.userAgentHeader: 'Obtainium',
+          HttpHeaders.userAgentHeader: 'ObtainX',
         },
       );
       if (response.statusCode == 200) {
@@ -481,14 +436,18 @@ class GitHub extends AppSource {
     }
     if (error == null) {
       storePATValidation(creds, settingsProvider);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(tr('githubPATValidated'))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        buildAppSnackBar(
+          context,
+          tr('githubPATValidated'),
+          type: ToastType.success,
+        ),
+      );
     } else {
       clearPATValidation(settingsProvider);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(error)));
+      ).showSnackBar(buildAppSnackBar(context, error, type: ToastType.error));
     }
   }
 
@@ -717,7 +676,13 @@ class GitHub extends AppSource {
     final filteredAssets = rel['filteredAssets'] as List<dynamic>?;
     final t = (filteredAssets ?? allAssets)
         ?.map((e) {
-          final updated = e?['updated_at'];
+          // GitHub assets carry both timestamps; Forgejo/Gitea assets (Codeberg,
+          // which reuses this code) expose only `created_at` — verified against
+          // codeberg.org/api/v1 on 2026-08-18. Without the fallback this
+          // returned null for every Forgejo asset, so "Use latest asset upload
+          // as release date" silently did nothing there and left the release
+          // date unset.
+          final updated = e?['updated_at'] ?? e?['created_at'];
           return updated is String ? DateTime.tryParse(updated) : null;
         })
         .where((e) => e != null)

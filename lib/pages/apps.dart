@@ -24,6 +24,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:progress_indicator_m3e/progress_indicator_m3e.dart';
 import 'package:obtainium/app_sources/apkmirror.dart';
+import 'package:obtainium/app_sources/codeberg.dart';
 import 'package:obtainium/app_sources/gitlab.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
 import 'package:obtainium/components/app_dropdown_field.dart';
@@ -58,6 +59,7 @@ import 'package:obtainium/theme/app_form_field_styles.dart';
 import 'package:obtainium/theme/app_theme_accent.dart';
 import 'package:obtainium/theme/app_segmented_button_theme.dart';
 import 'package:obtainium/theme/m3e_expressive_list.dart';
+import 'package:obtainium/widgets/app_toast.dart';
 import 'package:obtainium/widgets/help_hint_icon.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -111,6 +113,33 @@ bool appCategoriesMatchFilter(
     };
   }
   return true;
+}
+
+/// Host whose logo represents [app] in the Apps list source column.
+///
+/// The hostless catch-all sources (HTML, Direct APK link) declare no
+/// [AppSource.hosts], which used to leave the column blank. They fall back to
+/// the tracked URL's own host, so an app added from e.g. mozilla.org shows that
+/// site's favicon - matching what the app page's Sources row already resolves.
+String? sourceBadgeHostForApp(App app) {
+  // Resolved first because [SourceProvider.getSourceTemplate] throws
+  // [UnsupportedURLError] on a URL this malformed, and this runs per row.
+  final String? urlHost = Uri.tryParse(app.url)?.host;
+  if (urlHost == null || urlHost.isEmpty) {
+    return null;
+  }
+  final List<String> declaredHosts = SourceProvider()
+      .getSourceTemplate(app.url, overrideSource: app.overrideSource)
+      .hosts;
+  if (declaredHosts.isEmpty) {
+    return urlHost;
+  }
+  for (final String declaredHost in declaredHosts) {
+    if (urlHost == declaredHost || urlHost == 'www.$declaredHost') {
+      return declaredHost;
+    }
+  }
+  return declaredHosts.first;
 }
 
 bool appIsTrackOnlyForFilter(App app) =>
@@ -1598,23 +1627,21 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
               .removeAppsWithModal(context, [app]);
           if (removeResult.shouldShowSnackBar) {
             final Set<String> undoAppIds = removeResult.deferredUndoAppIds;
-            messenger
-              ?..clearSnackBars()
-              ..showSnackBar(
-                SnackBar(
-                  content: Text(tr('xAppsRemoved', args: ['1'])),
+            if (messenger != null && messenger.mounted) {
+              messenger.clearSnackBars();
+              messenger.showSnackBar(
+                buildAppSnackBar(
+                  messenger.context,
+                  tr('xAppsRemoved', args: ['1']),
                   persist: false,
                   duration: const Duration(seconds: 5),
-                  behavior: SnackBarBehavior.floating,
-                  action: undoAppIds.isNotEmpty
-                      ? SnackBarAction(
-                          label: tr('undo'),
-                          onPressed: () => provider
-                              .undoDeferredObtainiumRemovals(undoAppIds),
-                        )
+                  actionLabel: undoAppIds.isNotEmpty ? tr('undo') : null,
+                  onAction: undoAppIds.isNotEmpty
+                      ? () => provider.undoDeferredObtainiumRemovals(undoAppIds)
                       : null,
                 ),
               );
+            }
           }
         }
       case SwipeAction.open:
@@ -1915,6 +1942,41 @@ Future<String?> _loadLinkedChangeLog(
   return response.body;
 }
 
+/// Turns a relative changelog image path into an absolute URL for the forge
+/// that published [appUrl]. Absolute http(s) URLs are returned unchanged.
+String resolveChangeLogImageSrc({
+  required String src,
+  required String appUrl,
+  required AppSource appSource,
+}) {
+  if (src.startsWith('http://') || src.startsWith('https://')) {
+    return src;
+  }
+  try {
+    final Uri uri = Uri.parse(appUrl);
+    final List<String> segments = uri.pathSegments;
+    String cleanPath = src;
+    if (cleanPath.startsWith('./')) {
+      cleanPath = cleanPath.substring(2);
+    } else if (cleanPath.startsWith('/')) {
+      cleanPath = cleanPath.substring(1);
+    }
+
+    if (uri.host.contains('github.com') && segments.length >= 2) {
+      return 'https://raw.githubusercontent.com/${segments[0]}/${segments[1]}/HEAD/$cleanPath';
+    }
+    if (uri.host.contains('gitlab.com') && segments.length >= 2) {
+      return 'https://gitlab.com/${segments[0]}/${segments[1]}/-/raw/HEAD/$cleanPath';
+    }
+    if (appSource is Codeberg && segments.length >= 2) {
+      return '${uri.origin}/${segments[0]}/${segments[1]}/raw/branch/HEAD/$cleanPath';
+    }
+    return '${uri.origin}/$cleanPath';
+  } catch (_) {
+    return src;
+  }
+}
+
 void showChangeLogDialog(
   BuildContext context,
   App app,
@@ -1936,33 +1998,11 @@ void showChangeLogDialog(
     final srcRegex = RegExp("src=[\"']([^\"']+)[\"']", caseSensitive: false);
     final altRegex = RegExp("alt=[\"']([^\"']+)[\"']", caseSensitive: false);
 
-    String resolveUrl(String src) {
-      if (src.startsWith('http://') || src.startsWith('https://')) {
-        return src;
-      }
-      try {
-        final uri = Uri.parse(app.url);
-        final segments = uri.pathSegments;
-        var cleanPath = src;
-        if (cleanPath.startsWith('./')) {
-          cleanPath = cleanPath.substring(2);
-        } else if (cleanPath.startsWith('/')) {
-          cleanPath = cleanPath.substring(1);
-        }
-
-        if (uri.host.contains('github.com') && segments.length >= 2) {
-          return 'https://raw.githubusercontent.com/${segments[0]}/${segments[1]}/HEAD/$cleanPath';
-        } else if (uri.host.contains('gitlab.com') && segments.length >= 2) {
-          return 'https://gitlab.com/${segments[0]}/${segments[1]}/-/raw/HEAD/$cleanPath';
-        } else if (uri.host.contains('codeberg.org') && segments.length >= 2) {
-          return 'https://codeberg.org/${segments[0]}/${segments[1]}/raw/branch/HEAD/$cleanPath';
-        } else {
-          return '${uri.origin}/$cleanPath';
-        }
-      } catch (_) {
-        return src;
-      }
-    }
+    String resolveUrl(String src) => resolveChangeLogImageSrc(
+      src: src,
+      appUrl: app.url,
+      appSource: appSource,
+    );
 
     processedChangeLog = processedChangeLog.replaceAllMapped(htmlImgRegex, (
       match,
@@ -4543,13 +4583,7 @@ class AppsPageState extends State<AppsPage> {
       final hasUpdate = installed != null && appHasActionableUpdate(app.app);
       final hasUncertainUpdate =
           installed != null && versionOrderUncertainUpdate(app.app);
-      final sourceHost = sourceProvider
-          .getSourceTemplate(
-            app.app.url,
-            overrideSource: app.app.overrideSource,
-          )
-          .hosts
-          .firstOrNull;
+      final sourceHost = sourceBadgeHostForApp(app.app);
       // M3 Container Transform: tapping the row morphs the row's container
       // into the AppPage's container. Replaces the previous
       // `Navigator.push(heroFriendlyAppPageRoute(...))` flow plus the
@@ -5311,27 +5345,26 @@ class AppsPageState extends State<AppsPage> {
                             removeResult.deferredUndoAppIds.isNotEmpty
                             ? removeResult.deferredUndoAppIds.length
                             : currentSelectedApps.length;
-                        messenger
-                          ?..clearSnackBars()
-                          ..showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                tr('xAppsRemoved', args: ['$removedCount']),
-                              ),
+                        if (messenger != null && messenger.mounted) {
+                          messenger.clearSnackBars();
+                          messenger.showSnackBar(
+                            buildAppSnackBar(
+                              messenger.context,
+                              tr('xAppsRemoved', args: ['$removedCount']),
                               persist: false,
                               duration: const Duration(seconds: 5),
-                              behavior: SnackBarBehavior.floating,
-                              action: undoAppIds.isNotEmpty
-                                  ? SnackBarAction(
-                                      label: tr('undo'),
-                                      onPressed: () => appsProviderRef
-                                          .undoDeferredObtainiumRemovals(
-                                            undoAppIds,
-                                          ),
-                                    )
+                              actionLabel: undoAppIds.isNotEmpty
+                                  ? tr('undo')
+                                  : null,
+                              onAction: undoAppIds.isNotEmpty
+                                  ? () => appsProviderRef
+                                        .undoDeferredObtainiumRemovals(
+                                          undoAppIds,
+                                        )
                                   : null,
                             ),
                           );
+                        }
                       }
                     },
                     autoPop: true,
@@ -6593,41 +6626,40 @@ class AppsPageState extends State<AppsPage> {
                                                                   .length
                                                             : selectedApps
                                                                   .length;
-                                                        messenger
-                                                          ?..clearSnackBars()
-                                                          ..showSnackBar(
-                                                            SnackBar(
-                                                              content: Text(
-                                                                tr(
-                                                                  'xAppsRemoved',
-                                                                  args: [
-                                                                    '$removedCount',
-                                                                  ],
-                                                                ),
+                                                        if (messenger != null &&
+                                                            messenger.mounted) {
+                                                          messenger
+                                                              .clearSnackBars();
+                                                          messenger.showSnackBar(
+                                                            buildAppSnackBar(
+                                                              messenger.context,
+                                                              tr(
+                                                                'xAppsRemoved',
+                                                                args: [
+                                                                  '$removedCount',
+                                                                ],
                                                               ),
                                                               persist: false,
                                                               duration:
                                                                   const Duration(
                                                                     seconds: 5,
                                                                   ),
-                                                              behavior:
-                                                                  SnackBarBehavior
-                                                                      .floating,
-                                                              action:
+                                                              actionLabel:
                                                                   undoAppIds
                                                                       .isNotEmpty
-                                                                  ? SnackBarAction(
-                                                                      label: tr(
-                                                                        'undo',
-                                                                      ),
-                                                                      onPressed: () =>
-                                                                          appsProviderRef.undoDeferredObtainiumRemovals(
-                                                                            undoAppIds,
-                                                                          ),
-                                                                    )
+                                                                  ? tr('undo')
+                                                                  : null,
+                                                              onAction:
+                                                                  undoAppIds
+                                                                      .isNotEmpty
+                                                                  ? () => appsProviderRef
+                                                                        .undoDeferredObtainiumRemovals(
+                                                                          undoAppIds,
+                                                                        )
                                                                   : null,
                                                             ),
                                                           );
+                                                        }
                                                       }
                                                     },
                                                     icon: const Icon(

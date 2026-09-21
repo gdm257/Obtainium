@@ -26,11 +26,13 @@ class HomePage extends StatefulWidget {
 }
 
 class NavigationPageItem {
-  late String title;
-  late IconData icon;
-  late Widget widget;
+  final String titleKey;
+  final IconData icon;
+  final Widget widget;
 
-  NavigationPageItem(this.title, this.icon, this.widget);
+  NavigationPageItem(this.titleKey, this.icon, this.widget);
+
+  String get title => tr(titleKey);
 }
 
 /// Keeps the system navigation-bar padding stable while Android animates the
@@ -238,7 +240,7 @@ class HomePageState extends State<HomePage> {
 
   late final List<NavigationPageItem> pages = [
     NavigationPageItem(
-      tr('appsString'),
+      'appsString',
       Icons.apps,
       AppsPage(
         key: GlobalKey<AppsPageState>(),
@@ -247,7 +249,7 @@ class HomePageState extends State<HomePage> {
       ),
     ),
     NavigationPageItem(
-      tr('addApp'),
+      'addApp',
       Icons.add,
       AddAppPage(
         key: GlobalKey<AddAppPageState>(),
@@ -256,12 +258,12 @@ class HomePageState extends State<HomePage> {
       ),
     ),
     NavigationPageItem(
-      tr('importExport'),
+      'importExport',
       Icons.backup_outlined,
       const ImportExportPage(),
     ),
     NavigationPageItem(
-      tr('settings'),
+      'settings',
       Icons.settings,
       SettingsPage(key: GlobalKey<SettingsPageState>()),
     ),

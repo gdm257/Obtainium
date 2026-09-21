@@ -11,6 +11,7 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
+import 'package:obtainium/providers/virustotal_provider.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:obtainium/theme/app_page_icon_colors.dart';
 import 'package:obtainium/theme/app_theme_accent.dart';
@@ -54,6 +55,19 @@ Future<bool> persistAdditionalOptionsForm({
   normalizeVersionDetectionSettings(app.additionalSettings);
   if (app.additionalSettings.containsKey(installStatusResetKey)) {
     app = resetInstallStatusToDeviceVersion(app, appInMem.installedInfo);
+  }
+  // Excluding an app drops any verdict a previous scan left behind. The app
+  // detail page renders latestMalwareScanStatus as a Clean/Flagged/Failed chip,
+  // and once scanning is off for this app that chip can never be refreshed or
+  // contradicted - leaving a stale "Clean" badge asserting something nothing is
+  // checking anymore.
+  if (!app.settings.getBool(enableVirusTotalScanKey, defaultValue: true) &&
+      app.latestMalwareScanStatus != null) {
+    app = app.copyWith(
+      latestMalwareScanStatus: null,
+      latestMalwareScanDetail: null,
+      latestMalwareScanReportUrl: null,
+    );
   }
   if (source is GitHub) {
     if (!source.canVerifyAttestations(
@@ -222,6 +236,22 @@ class _AdditionalOptionsPageState extends State<AdditionalOptionsPage> {
           } else {
             element.value = stored;
           }
+        }
+        // Same shape as the build-verification gating below: the switch stays
+        // visible but inert when VirusTotal scanning isn't usable, so people can
+        // see the option exists (and, via its tooltip, what it needs) instead of
+        // hunting for a control that silently vanished.
+        //
+        // Unlike buildVerificationMode, a disabled value here is NOT clamped. The
+        // attestation clamp exists because a stale 'enforce' is a security claim
+        // that must not outlive the PAT backing it; this switch is the opposite -
+        // clamping it would silently re-enable scanning for an app the user
+        // deliberately excluded (e.g. a 700MB APK) the moment they toggled global
+        // scanning off and back on.
+        if (element is GeneratedFormSwitch &&
+            element.key == enableVirusTotalScanKey &&
+            !virusTotalScanningAvailable(settingsProvider)) {
+          element.disabled = true;
         }
         if (source is GitHub &&
             element is GeneratedFormDropdown &&

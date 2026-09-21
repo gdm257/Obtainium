@@ -18,6 +18,7 @@ import 'package:obtainium/app_sources/apkmirror.dart';
 import 'package:obtainium/app_sources/fdroid.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/pages/app.dart';
+import 'package:obtainium/app_sources/codeberg.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -1005,6 +1006,35 @@ void main() {
   // speculative HTTP requests per APKMirror app per refresh and the
   // success rate was abysmal. The lazy size resolver now only walks the
   // actual download links found on the release page HTML.
+
+  // APKMirror's Cloudflare rule allowlists HTML pages by a substring match on
+  // `APKUpdater`; a browser-style UA is answered with a 403 challenge, which
+  // silently disables icon/size/changelog/app-id scraping. Pin both the token
+  // and the ObtainX attribution so a future header cleanup can't quietly undo
+  // it.
+  test('apk mirror user agent carries the allowlisted token', () async {
+    expect(apkMirrorAllowlistedUserAgentToken.contains('APKUpdater'), true);
+    expect(apkMirrorUserAgent('2.9.9'), contains('APKUpdater'));
+    expect(apkMirrorUserAgent('2.9.9'), contains('ObtainX/2.9.9'));
+    // Unknown version: still allowlisted, just without attribution.
+    expect(apkMirrorUserAgent(), apkMirrorAllowlistedUserAgentToken);
+    expect(apkMirrorUserAgent('  '), apkMirrorAllowlistedUserAgentToken);
+    // Whatever the UA ends up being, it must not read as a browser.
+    final String ua = apkMirrorUserAgent('2.9.9');
+    expect(ua.contains('Mozilla'), false);
+    expect(ua.contains('Safari'), false);
+
+    final Map<String, String>? headers = await APKMirror().getRequestHeaders(
+      const <String, dynamic>{},
+      'https://www.apkmirror.com/apk/signal-foundation/signal-private-messenger/',
+    );
+    // Lowercase key on purpose: sourceRequest injects a default ObtainX UA
+    // unless a case-insensitive 'user-agent' is already present.
+    final String? sentUserAgent = headers?.entries
+        .firstWhere((e) => e.key.toLowerCase() == 'user-agent')
+        .value;
+    expect(sentUserAgent, contains('APKUpdater'));
+  });
 
   test('apk mirror app slug aliases standardize to canonical app slug', () {
     expect(
@@ -2204,6 +2234,98 @@ This app description should not be included.
     );
   });
 
+  // Codeberg reuses GitHub's option list, but attestations are GitHub-only:
+  // AppsProvider.verifyGitHubAttestation returns early on `source is! GitHub`,
+  // and the Add-app sanitiser is gated on `pickedSource is GitHub`, so the
+  // dropdown was both inert and unsanitised there.
+  test('Codeberg drops the GitHub-only build verification option', () {
+    final Set<String> codebergKeys = Codeberg()
+        .additionalSourceAppSpecificSettingFormItems
+        .expand((row) => row)
+        .map((item) => item.key)
+        .toSet();
+    final Set<String> githubKeys = GitHub()
+        .additionalSourceAppSpecificSettingFormItems
+        .expand((row) => row)
+        .map((item) => item.key)
+        .toSet();
+
+    expect(codebergKeys, isNot(contains(GitHub.buildVerificationModeKey)));
+    expect(githubKeys, contains(GitHub.buildVerificationModeKey));
+    // Everything else stays: Forgejo's release payloads carry tag_name, name,
+    // body, prerelease and published_at, and it serves /releases/latest.
+    expect(
+      codebergKeys,
+      githubKeys.difference({GitHub.buildVerificationModeKey}),
+    );
+    // No row is left empty by the filtering.
+    for (final row in Codeberg().additionalSourceAppSpecificSettingFormItems) {
+      expect(row, isNotEmpty);
+    }
+  });
+
+  // Forgejo/Gitea assets expose only `created_at`, so reading `updated_at`
+  // alone made "use latest asset upload as release date" a no-op on Codeberg.
+  //
+  // The input is deliberately in the WRONG order (newest first) so the sort has
+  // to actually move something: with no usable dates every comparison returns 0
+  // and the stable sort leaves the input untouched, which is how a first version
+  // of this test passed against the unfixed code.
+  test('asset-date sorting reads Forgejo created_at as well as updated_at', () {
+    List<dynamic> newestFirst(String dateKey) => <dynamic>[
+      <String, dynamic>{
+        'tag_name': 'newer',
+        'assets': [
+          {'name': 'b.apk', dateKey: '2026-06-01T00:00:00Z'},
+        ],
+      },
+      <String, dynamic>{
+        'tag_name': 'older',
+        'assets': [
+          {'name': 'a.apk', dateKey: '2026-01-01T00:00:00Z'},
+        ],
+      },
+    ];
+
+    // Sorting is ascending, so a working asset date puts 'older' first.
+    final gitHubShaped = newestFirst('updated_at');
+    GitHub().sortGitHubReleases(gitHubShaped, 'date', true);
+    expect(gitHubShaped.map((r) => r['tag_name']).toList(), <String>[
+      'older',
+      'newer',
+    ]);
+
+    final forgejoShaped = newestFirst('created_at');
+    GitHub().sortGitHubReleases(forgejoShaped, 'date', true);
+    expect(forgejoShaped.map((r) => r['tag_name']).toList(), <String>[
+      'older',
+      'newer',
+    ]);
+
+    // Guard the guard: with neither timestamp there is nothing to sort by, so
+    // the original order must survive. If this ever starts reordering, the two
+    // assertions above stopped proving anything.
+    final undated = <dynamic>[
+      <String, dynamic>{
+        'tag_name': 'newer',
+        'assets': [
+          {'name': 'b.apk'},
+        ],
+      },
+      <String, dynamic>{
+        'tag_name': 'older',
+        'assets': [
+          {'name': 'a.apk'},
+        ],
+      },
+    ];
+    GitHub().sortGitHubReleases(undated, 'date', true);
+    expect(undated.map((r) => r['tag_name']).toList(), <String>[
+      'newer',
+      'older',
+    ]);
+  });
+
   test('GitHub smart-name release sorting ignores version case', () {
     final releases = <dynamic>[
       <String, dynamic>{'tag_name': 'v2.9.9-PREVIEW-251', 'prerelease': true},
@@ -2216,5 +2338,119 @@ This app description should not be included.
       'v2.9.9-preview-247',
       'v2.9.9-PREVIEW-251',
     ]);
+  });
+
+  // An always-track-only source (APKMirror, RockMods) resolves a real package
+  // id, so absence from the device is a reliable uninstall signal. Before the
+  // fix, exempting every track-only app from step 1 pinned these to "installed
+  // <old version>" permanently — pull-to-refresh could not clear it.
+  test('track-only app with a real package id clears installed version '
+      'once uninstalled', () {
+    final appsProvider = AppsProvider(isBg: true);
+    final app = App(
+      id: 'com.example.trackedapp',
+      url: 'https://www.apkmirror.com/apk/vendor/tracked-app',
+      author: 'vendor',
+      name: 'Tracked App',
+      installedVersion: '1.2.3',
+      latestVersion: '1.2.4',
+      apkUrls: const <MapEntry<String, String>>[],
+      preferredApkIndex: 0,
+      additionalSettings: {
+        'trackOnly': true,
+        'trackOnlyTemporaryPackageId': false,
+        'trackOnlyUndeterminedInstalledVersion': false,
+        'versionDetection': 'auto',
+      },
+      lastUpdateCheck: DateTime.now(),
+      pinned: false,
+    );
+
+    final correctedApp = appsProvider.getCorrectedInstallStatusAppIfPossible(
+      app,
+      null,
+    );
+
+    expect(correctedApp, isNotNull);
+    expect(correctedApp!.installedVersion, isNull);
+    // Determined ("not installed"), so the app page's fix-the-package-id error
+    // card must stay hidden.
+    expect(
+      correctedApp.additionalSettings['trackOnlyUndeterminedInstalledVersion'],
+      false,
+    );
+  });
+
+  // A temporary (sha-prefix) package id can never match an installed package,
+  // so an absent lookup says nothing and the recorded version must survive.
+  test('track-only app with a temporary package id keeps its installed '
+      'version when absent from the device', () {
+    final appsProvider = AppsProvider(isBg: true);
+    final app = App(
+      id: 'a1b2c3d4e5f6',
+      url: 'https://www.apkmirror.com/apk/vendor/temp-id-app',
+      author: 'vendor',
+      name: 'Temp Id App',
+      installedVersion: '1.2.3',
+      latestVersion: '1.2.3',
+      apkUrls: const <MapEntry<String, String>>[],
+      preferredApkIndex: 0,
+      additionalSettings: {
+        'trackOnly': true,
+        'trackOnlyTemporaryPackageId': true,
+        'trackOnlyUndeterminedInstalledVersion': true,
+        'versionDetection': 'auto',
+      },
+      lastUpdateCheck: DateTime.now(),
+      pinned: false,
+    );
+
+    final correctedApp = appsProvider.getCorrectedInstallStatusAppIfPossible(
+      app,
+      null,
+    );
+
+    expect(correctedApp?.installedVersion ?? app.installedVersion, '1.2.3');
+  });
+
+  // The opposite direction was always trusted for real-id track-only apps;
+  // assert it still is, so the two directions stay symmetric.
+  test('track-only app with a real package id adopts the device version '
+      'once installed', () {
+    final appsProvider = AppsProvider(isBg: true);
+    final app = App(
+      id: 'com.example.trackedapp',
+      url: 'https://www.apkmirror.com/apk/vendor/tracked-app',
+      author: 'vendor',
+      name: 'Tracked App',
+      installedVersion: null,
+      latestVersion: '1.2.4',
+      apkUrls: const <MapEntry<String, String>>[],
+      preferredApkIndex: 0,
+      additionalSettings: {
+        'trackOnly': true,
+        'trackOnlyTemporaryPackageId': false,
+        'trackOnlyUndeterminedInstalledVersion': true,
+        'versionDetection': 'auto',
+      },
+      lastUpdateCheck: DateTime.now(),
+      pinned: false,
+    );
+
+    final correctedApp = appsProvider.getCorrectedInstallStatusAppIfPossible(
+      app,
+      const FakePackageInfo(
+        packageName: 'com.example.trackedapp',
+        versionName: '1.2.3',
+        versionCode: 123,
+      ),
+    );
+
+    expect(correctedApp, isNotNull);
+    expect(correctedApp!.installedVersion, '1.2.3');
+    expect(
+      correctedApp.additionalSettings['trackOnlyUndeterminedInstalledVersion'],
+      false,
+    );
   });
 }

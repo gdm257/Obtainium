@@ -60,6 +60,22 @@ void storeApiKeyValidation(String apiKey, SettingsProvider settingsProvider) {
 const String virusTotalValidatedApiKeyFingerprintKey =
     'virustotal-api-key-validated-fingerprint';
 
+/// Whether VirusTotal scanning is usable at all right now: the global feature
+/// toggle is on AND a saved API key has passed validation. Per-app exclusions are
+/// NOT considered here - see AppsProvider.willScanApkWithVirusTotal for the
+/// per-install verdict. Mirrors GitHub.canVerifyAttestations: the form pages call
+/// this to decide whether the per-app switch is actionable, so page-level gating
+/// and the install-time gate can't drift apart.
+bool virusTotalScanningAvailable(SettingsProvider settingsProvider) {
+  if (!settingsProvider.enableVirusTotalScanning) {
+    return false;
+  }
+  final String? apiKey = settingsProvider.getSettingString(virusTotalApiKeyKey);
+  return apiKey != null &&
+      apiKey.isNotEmpty &&
+      hasValidatedApiKey(apiKey, settingsProvider);
+}
+
 const String _apiBase = 'https://www.virustotal.com/api/v3';
 
 // VirusTotal's free-tier direct-upload cap. Files larger than this must go

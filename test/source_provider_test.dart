@@ -1410,6 +1410,61 @@ void main() {
       expect(app.latestVersion, '4.8.3');
     },
   );
+
+  test('per-app VirusTotal switch is offered in the advanced section', () {
+    final List<List<GeneratedFormItem>> rows =
+        GitHub().combinedAppSpecificSettingFormItems;
+    final int advancedHeaderIndex = rows.indexWhere(
+      (List<GeneratedFormItem> row) =>
+          row.length == 1 && row.first.key == '__formSectionAdvanced',
+    );
+    final int scanIndex = rows.indexWhere(
+      (List<GeneratedFormItem> row) => row.any(
+        (GeneratedFormItem item) => item.key == enableVirusTotalScanKey,
+      ),
+    );
+
+    expect(advancedHeaderIndex, greaterThanOrEqualTo(0));
+    expect(scanIndex, greaterThan(advancedHeaderIndex));
+
+    final GeneratedFormItem item = rows[scanIndex].firstWhere(
+      (GeneratedFormItem item) => item.key == enableVirusTotalScanKey,
+    );
+    expect(item, isA<GeneratedFormSwitch>());
+    // Enabled by default in the form: the pages disable it only when VirusTotal
+    // scanning isn't usable, so a plain form build must leave it interactive.
+    expect((item as GeneratedFormSwitch).disabled, false);
+    // Same polarity as the global setting - on means "scan" - so it must default
+    // to on, matching what an app that was never configured actually does.
+    expect(item.value, true);
+  });
+
+  test('a saved app with no VirusTotal key is still scanned', () {
+    // The switch defaults to on, so every read must pass defaultValue: true.
+    // Apps saved before the key existed have no entry for it, and getBool's own
+    // default (false) would read as "don't scan" - silently disabling scanning
+    // for every pre-existing app on upgrade.
+    expect(
+      const TypedSettings(
+        <String, dynamic>{},
+      ).getBool(enableVirusTotalScanKey, defaultValue: true),
+      true,
+    );
+    expect(
+      const TypedSettings(<String, dynamic>{
+        enableVirusTotalScanKey: false,
+      }).getBool(enableVirusTotalScanKey, defaultValue: true),
+      false,
+    );
+    // Backups round-trip additionalSettings through JSON, where a bool can come
+    // back as a string.
+    expect(
+      const TypedSettings(<String, dynamic>{
+        enableVirusTotalScanKey: 'false',
+      }).getBool(enableVirusTotalScanKey, defaultValue: true),
+      false,
+    );
+  });
 }
 
 class _StubGitLab extends GitLab {

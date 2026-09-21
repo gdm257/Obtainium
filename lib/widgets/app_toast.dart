@@ -3,6 +3,109 @@ import 'package:fluttertoast/fluttertoast.dart';
 
 enum ToastType { info, success, warning, error }
 
+class _ToastVisuals {
+  const _ToastVisuals({
+    required this.iconColor,
+    required this.iconBackgroundColor,
+    required this.defaultIcon,
+  });
+
+  final Color iconColor;
+  final Color iconBackgroundColor;
+  final IconData defaultIcon;
+}
+
+_ToastVisuals _resolveToastVisuals(ColorScheme colorScheme, ToastType type) {
+  switch (type) {
+    case ToastType.success:
+      return _ToastVisuals(
+        iconColor: colorScheme.onSecondaryContainer,
+        iconBackgroundColor: colorScheme.secondaryContainer,
+        defaultIcon: Icons.check_circle_rounded,
+      );
+    case ToastType.warning:
+      return _ToastVisuals(
+        iconColor: colorScheme.onTertiaryContainer,
+        iconBackgroundColor: colorScheme.tertiaryContainer,
+        defaultIcon: Icons.warning_amber_rounded,
+      );
+    case ToastType.error:
+      return _ToastVisuals(
+        iconColor: colorScheme.onErrorContainer,
+        iconBackgroundColor: colorScheme.errorContainer,
+        defaultIcon: Icons.error_outline_rounded,
+      );
+    case ToastType.info:
+      return _ToastVisuals(
+        iconColor: colorScheme.onPrimaryContainer,
+        iconBackgroundColor: colorScheme.primaryContainer,
+        defaultIcon: Icons.info_outline_rounded,
+      );
+  }
+}
+
+/// Builds a [SnackBar] sharing [showAppToast]'s per-[ToastType] icon/color
+/// scheme, so screen-tied feedback (which must stay a SnackBar for actions,
+/// queueing, and accessibility) looks consistent with the toast pipe used by
+/// background/installer flows.
+SnackBar buildAppSnackBar(
+  BuildContext context,
+  String message, {
+  ToastType type = ToastType.info,
+  IconData? icon,
+  Duration duration = const Duration(seconds: 4),
+  String? actionLabel,
+  VoidCallback? onAction,
+  bool? persist,
+  ThemeData? theme,
+}) {
+  final ColorScheme colorScheme = (theme ?? Theme.of(context)).colorScheme;
+  final _ToastVisuals visuals = _resolveToastVisuals(colorScheme, type);
+  final Color backgroundColor = Color.lerp(
+    colorScheme.surfaceContainerHighest,
+    colorScheme.inverseSurface,
+    0.18,
+  )!;
+
+  return SnackBar(
+    duration: duration,
+    persist: persist,
+    backgroundColor: backgroundColor,
+    action: actionLabel == null || onAction == null
+        ? null
+        : SnackBarAction(
+            label: actionLabel,
+            textColor: colorScheme.primary,
+            onPressed: onAction,
+          ),
+    content: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DecoratedBox(
+          decoration: ShapeDecoration(
+            color: visuals.iconBackgroundColor,
+            shape: RoundedSuperellipseBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Icon(
+              icon ?? visuals.defaultIcon,
+              color: visuals.iconColor,
+              size: 18,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(message, style: TextStyle(color: colorScheme.onSurface)),
+        ),
+      ],
+    ),
+  );
+}
+
 class _PendingAppToast {
   const _PendingAppToast({
     required this.message,
@@ -100,34 +203,8 @@ void showAppToast(
       0.18,
     )!;
     final Color foregroundColor = colorScheme.onSurface;
-    Color iconColor;
-    Color iconBackgroundColor;
-    IconData defaultIcon;
-
-    switch (type) {
-      case ToastType.success:
-        iconColor = colorScheme.onSecondaryContainer;
-        iconBackgroundColor = colorScheme.secondaryContainer;
-        defaultIcon = Icons.check_circle_rounded;
-        break;
-      case ToastType.warning:
-        iconColor = colorScheme.onTertiaryContainer;
-        iconBackgroundColor = colorScheme.tertiaryContainer;
-        defaultIcon = Icons.warning_amber_rounded;
-        break;
-      case ToastType.error:
-        iconColor = colorScheme.onErrorContainer;
-        iconBackgroundColor = colorScheme.errorContainer;
-        defaultIcon = Icons.error_outline_rounded;
-        break;
-      case ToastType.info:
-        iconColor = colorScheme.onPrimaryContainer;
-        iconBackgroundColor = colorScheme.primaryContainer;
-        defaultIcon = Icons.info_outline_rounded;
-        break;
-    }
-
-    final IconData effectiveIcon = icon ?? defaultIcon;
+    final _ToastVisuals visuals = _resolveToastVisuals(colorScheme, type);
+    final IconData effectiveIcon = icon ?? visuals.defaultIcon;
 
     final Widget toastWidget = Material(
       color: Colors.transparent,
@@ -159,14 +236,18 @@ void showAppToast(
             children: [
               DecoratedBox(
                 decoration: ShapeDecoration(
-                  color: iconBackgroundColor,
+                  color: visuals.iconBackgroundColor,
                   shape: RoundedSuperellipseBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(6),
-                  child: Icon(effectiveIcon, color: iconColor, size: 18),
+                  child: Icon(
+                    effectiveIcon,
+                    color: visuals.iconColor,
+                    size: 18,
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
